@@ -38,8 +38,9 @@ const state = {
   moves: [],
   score: { [BLACK]: 0, [WHITE]: 0 },
   role: "local",
-  socket: null,
-  socketRole: "local",
+  clientId: crypto.randomUUID(),
+  supabaseClient: null,
+  channel: null,
   roomId: "",
 };
 
@@ -103,7 +104,7 @@ function handleMove(row, col, remote = false) {
 
 function isMyTurn() {
   if (state.role === "local") return true;
-  if (!state.socket || state.socket.readyState !== WebSocket.OPEN) return false;
+  if (!state.channel) return false;
   return (state.role === "host" && state.turn === BLACK) || (state.role === "guest" && state.turn === WHITE);
 }
 
@@ -212,17 +213,13 @@ function setNetworkStatus(text) {
   els.networkStatus.textContent = text;
 }
 
-function canUseWebSocket() {
-  return location.protocol === "http:" || location.protocol === "https:";
-}
-
 function resetScores() {
   state.score = { [BLACK]: 0, [WHITE]: 0 };
 }
 
 function hostRoom() {
-  if (!canUseWebSocket()) {
-    setNetworkStatus("请通过服务器地址打开页面");
+  if (!hasSupabaseConfig()) {
+    setNetworkStatus("请先填写 Supabase 配置");
     return;
   }
 
@@ -235,13 +232,13 @@ function hostRoom() {
   window.history.replaceState(null, "", getInviteUrl(state.roomId));
   setNetworkStatus(`房间 ${state.roomId} 等待好友`);
   els.shareHint.textContent = "你执黑先手。好友打开邀请链接后即可连接。";
-  openSocket(state.roomId, "host");
+  openRealtimeRoom(state.roomId, "host");
 }
 
 function joinRoom(roomId = els.roomInput.value.trim()) {
   if (!roomId) return;
-  if (!canUseWebSocket()) {
-    setNetworkStatus("请通过服务器地址打开页面");
+  if (!hasSupabaseConfig()) {
+    setNetworkStatus("请先填写 Supabase 配置");
     return;
   }
 
@@ -251,61 +248,64 @@ function joinRoom(roomId = els.roomInput.value.trim()) {
   resetScores();
   resetGame(true);
   setNetworkStatus(`正在连接房间 ${roomId}`);
-  openSocket(roomId, "guest");
+  openRealtimeRoom(roomId, "guest");
 }
 
-function openSocket(roomId, role) {
-  const protocol = location.protocol === "https:" ? "wss" : "ws";
-  const socket = new WebSocket(`${protocol}://${location.host}/ws`);
-  state.socket = socket;
-  state.socketRole = role;
-
-  socket.addEventListener("open", () => {
-    socket.send(JSON.stringify({ type: "join", room: roomId, role }));
-  });
-  socket.addEventListener("message", (event) => handleServerMessage(event.data));
-  socket.addEventListener("close", () => {
-    setNetworkStatus("好友已断开，保留当前棋局");
-    state.socket = null;
-    render();
-  });
-  socket.addEventListener("error", () => setNetworkStatus("连接失败：请确认使用 node server.js 运行"));
+function hasSupabaseConfig() {
+  const config = window.GOMOKU_SUPABASE || {};
+  return Boolean(window.supabase && config.url && config.anonKey);
 }
 
-function handleServerMessage(rawMessage) {
-  let message;
-  try {
-    message = JSON.parse(rawMessage);
-  } catch {
-    return;
-  }
+function openRealtimeRoom(roomId, role) {
+  const config = window.GOMOKU_SUPABASE;
+  state.supabaseClient = supabase.createClient(config.url, config.anonKey);
+  state.channel = state.supabaseClient.channel(`gomoku:${roomId}`, {
+    config: {
+      broadcast: { self: false },
+      presence: { key: state.clientId },
+    },
+  });
 
-  if (!message || typeof message !== "object") return;
+  state.channel
+    .on("broadcast", { event: "game" }, ({ payload }) => handleRemoteMessage(payload))
+    .on("presence", { event: "sync" }, () => updatePresenceStatus())
+    .subscribe(async (status) => {
+      if (status === "SUBSCRIBED") {
+        await state.channel.track({ role, joinedAt: Date.now() });
+        setNetworkStatus(role === "host" ? `房间 ${roomId} 等待好友` : `已加入房间 ${roomId}`);
+        if (role === "guest") send({ type: "hello" });
+        render();
+      }
 
-  if (message.type === "joined") {
-    state.role = state.socketRole || message.role || state.role;
-    setNetworkStatus(state.role === "host" ? `房间 ${message.room} 等待好友` : `已加入房间 ${message.room}`);
-    render();
-    return;
-  }
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        setNetworkStatus("连接失败：检查 Supabase 配置");
+      }
+    });
+}
 
-  if (message.type === "connected") {
-    state.role = state.socketRole || message.role || state.role;
+function updatePresenceStatus() {
+  if (!state.channel || state.role === "local") return;
+
+  const players = Object.values(state.channel.presenceState()).flat();
+  const hasOpponent = players.some((player) => player.role && player.role !== state.role);
+  if (hasOpponent) {
     setNetworkStatus(state.role === "host" ? "已连接：你执黑" : "已连接：你执白");
     els.shareHint.textContent = "联机对局中，落子会自动同步。";
     if (state.role === "host") send({ type: "sync", payload: serializeGame() });
-    render();
-    return;
+  } else {
+    setNetworkStatus(state.role === "host" ? `房间 ${state.roomId} 等待好友` : `已加入房间 ${state.roomId}`);
   }
+  render();
+}
 
-  if (message.type === "peer-left") {
-    setNetworkStatus("好友已离开，保留当前棋局");
+function handleRemoteMessage(message) {
+  if (!message || typeof message !== "object" || message.from === state.clientId) return;
+
+  if (message.type === "hello" && state.role === "host") {
+    setNetworkStatus("已连接：你执黑");
+    els.shareHint.textContent = "联机对局中，落子会自动同步。";
+    send({ type: "sync", payload: serializeGame() });
     render();
-    return;
-  }
-
-  if (message.type === "error") {
-    setNetworkStatus(message.message || "联机失败");
     return;
   }
 
@@ -323,13 +323,20 @@ function handleServerMessage(rawMessage) {
 
   if (message.type === "sync") {
     hydrateGame(message.payload);
+    if (state.role === "guest") {
+      setNetworkStatus("已连接：你执白");
+      els.shareHint.textContent = "联机对局中，落子会自动同步。";
+    }
   }
 }
 
 function send(message) {
-  if (state.socket && state.socket.readyState === WebSocket.OPEN) {
-    state.socket.send(JSON.stringify(message));
-  }
+  if (!state.channel) return;
+  state.channel.send({
+    type: "broadcast",
+    event: "game",
+    payload: { ...message, from: state.clientId },
+  });
 }
 
 function serializeGame() {
@@ -353,9 +360,11 @@ function hydrateGame(payload) {
 }
 
 function closeConnection() {
-  if (state.socket) state.socket.close();
-  state.socket = null;
-  state.socketRole = "local";
+  if (state.channel && state.supabaseClient) {
+    state.supabaseClient.removeChannel(state.channel);
+  }
+  state.channel = null;
+  state.supabaseClient = null;
   state.role = "local";
 }
 

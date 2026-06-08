@@ -1,23 +1,36 @@
 # 五子棋对战小网页
 
-这是一个小型五子棋网页，支持本地双人对战，也支持通过房间链接在线对战。
+这是一个纯静态五子棋网页，支持本地双人对战，也支持通过 Supabase Realtime 分享房间在线对战。
 
-## 在线对战
+## 配置 Supabase
 
-在线房间使用内置 WebSocket 服务实现。把项目部署到能运行 Node.js 的平台后：
+打开 `config.js`，填入你的 Supabase 项目配置：
 
-1. 打开网页，点击“创建房间”。
-2. 点击“复制邀请链接”。
-3. 把链接发给好友，好友打开后会自动加入房间。
+```js
+window.GOMOKU_SUPABASE = {
+  url: "https://你的项目.supabase.co",
+  anonKey: "你的 anon public key",
+};
+```
 
-创建房间的人执黑先手，加入房间的人执白。
+`anon public key` 是公开前端 key，不是 service role key。
+
+## 部署到 Netlify
+
+1. 把项目上传到 GitHub。
+2. 在 Netlify 新建站点，选择这个 GitHub 仓库。
+3. Build command 留空。
+4. Publish directory 填 `.`。
+5. 部署完成后打开站点，点击“创建房间”，复制邀请链接给好友。
 
 ## 本地预览
 
-在当前目录运行：
+可以直接双击 `index.html` 玩本地双人模式。
+
+如果要测试联机，建议用一个本地静态服务器打开：
 
 ```powershell
-node server.js
+python -m http.server 4173 --bind 127.0.0.1
 ```
 
 然后访问：

@@ -5,7 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>五子棋对战</title>
     <link rel="stylesheet" href="./styles.css" />
-    <script src="./app.js?v=8" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
+    <script src="./config.js" defer></script>
+    <script src="./app.js?v=9" defer></script>
   </head>
   <body>
     <main class="shell">
@@ -38,7 +40,7 @@
             <button id="hostBtn">创建房间</button>
             <button id="copyBtn" class="secondary">复制邀请链接</button>
           </div>
-          <p class="hint" id="shareHint">用内置服务器运行后，把邀请链接发给好友即可对战。</p>
+          <p class="hint" id="shareHint">配置 Supabase 后，把邀请链接发给好友即可对战。</p>
         </section>
 
         <section class="section">
