@@ -188,44 +188,68 @@ function getForbiddenReason(row, col) {
   if (getDirections().some(([dr, dc]) => 1 + countDirection(row, col, dr, dc, BLACK) + countDirection(row, col, -dr, -dc, BLACK) >= 6)) {
     return "长连";
   }
-  if (countFourThreats(row, col, BLACK) >= 2) return "四四";
+  if (countFourLines(row, col, BLACK) >= 2) return "四四";
   if (countOpenThreeLines(row, col, BLACK) >= 2) return "三三";
   return "";
 }
 
-function countFourThreats(row, col, color) {
-  const threats = new Set();
-  getNearbyEmptyCells(row, col, 4).forEach((move) => {
-    state.board[move.row][move.col] = color;
-    const makesFive = hasExactFive(move.row, move.col, color);
-    state.board[move.row][move.col] = EMPTY;
-    if (makesFive) threats.add(`${move.row},${move.col}`);
-  });
-  return threats.size;
+function countFourLines(row, col, color) {
+  return getDirections().filter(([dr, dc]) => lineHasFour(row, col, dr, dc, color)).length;
+}
+
+function lineHasFour(row, col, dr, dc, color) {
+  return getLineOffsets(row, col, dr, dc)
+    .filter((offset) => offset !== 0)
+    .some((offset) => {
+      const moveRow = row + dr * offset;
+      const moveCol = col + dc * offset;
+      if (state.board[moveRow]?.[moveCol] !== EMPTY) return false;
+      state.board[moveRow][moveCol] = color;
+      const makesFive = hasExactFive(moveRow, moveCol, color);
+      state.board[moveRow][moveCol] = EMPTY;
+      return makesFive;
+    });
 }
 
 function countOpenThreeLines(row, col, color) {
-  return getDirections().filter(([dr, dc]) => lineHasOpenThree(row, col, dr, dc, color)).length;
+  return getDirections().filter(([dr, dc]) => lineCanBecomeOpenFour(row, col, dr, dc, color)).length;
 }
 
-function lineHasOpenThree(row, col, dr, dc, color) {
-  const cells = [];
-  for (let offset = -5; offset <= 5; offset += 1) {
+function lineCanBecomeOpenFour(row, col, dr, dc, color) {
+  return getLineOffsets(row, col, dr, dc)
+    .filter((offset) => offset !== 0)
+    .some((offset) => {
+      const moveRow = row + dr * offset;
+      const moveCol = col + dc * offset;
+      if (state.board[moveRow]?.[moveCol] !== EMPTY) return false;
+      state.board[moveRow][moveCol] = color;
+      const openFour = lineIsOpenFour(moveRow, moveCol, dr, dc, color);
+      state.board[moveRow][moveCol] = EMPTY;
+      return openFour;
+    });
+}
+
+function lineIsOpenFour(row, col, dr, dc, color) {
+  const forward = countDirection(row, col, dr, dc, color);
+  const backward = countDirection(row, col, -dr, -dc, color);
+  const count = 1 + forward + backward;
+  if (count !== 4) return false;
+
+  const forwardEnd = getCell(row + dr * (forward + 1), col + dc * (forward + 1));
+  const backwardEnd = getCell(row - dr * (backward + 1), col - dc * (backward + 1));
+  return forwardEnd === EMPTY && backwardEnd === EMPTY;
+}
+
+function getLineOffsets(row, col, dr, dc) {
+  const offsets = [];
+  for (let offset = -4; offset <= 4; offset += 1) {
     const currentRow = row + dr * offset;
     const currentCol = col + dc * offset;
-    if (currentRow < 0 || currentRow >= BOARD_SIZE || currentCol < 0 || currentCol >= BOARD_SIZE) {
-      cells.push("#");
-    } else if (state.board[currentRow][currentCol] === EMPTY) {
-      cells.push(".");
-    } else if (state.board[currentRow][currentCol] === color) {
-      cells.push("X");
-    } else {
-      cells.push("O");
+    if (currentRow >= 0 && currentRow < BOARD_SIZE && currentCol >= 0 && currentCol < BOARD_SIZE) {
+      offsets.push(offset);
     }
   }
-
-  const line = cells.join("");
-  return /(^|[.#O])\.XXX\.([.#O]|$)/.test(line) || /(^|[.#O])\.XX\.X\.([.#O]|$)/.test(line) || /(^|[.#O])\.X\.XX\.([.#O]|$)/.test(line);
+  return offsets;
 }
 
 function getNearbyEmptyCells(row, col, radius) {

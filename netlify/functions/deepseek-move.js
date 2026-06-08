@@ -157,51 +157,71 @@ function getForbiddenReason(board, row, col) {
   if (getDirections().some(([dr, dc]) => 1 + countDirection(board, row, col, dr, dc, BLACK) + countDirection(board, row, col, -dr, -dc, BLACK) >= 6)) {
     return "overline";
   }
-  if (countFourThreats(board, row, col, BLACK) >= 2) return "double-four";
+  if (countFourLines(board, row, col, BLACK) >= 2) return "double-four";
   if (countOpenThreeLines(board, row, col, BLACK) >= 2) return "double-three";
   return "";
 }
 
-function countFourThreats(board, row, col, color) {
-  const threats = new Set();
-  getNearbyEmptyCells(board, row, col, 4).forEach((move) => {
-    board[move.row][move.col] = color;
-    const makesFive = hasExactFive(board, move.row, move.col, color);
-    board[move.row][move.col] = EMPTY;
-    if (makesFive) threats.add(`${move.row},${move.col}`);
-  });
-  return threats.size;
+function countFourLines(board, row, col, color) {
+  return getDirections().filter(([dr, dc]) => lineHasFour(board, row, col, dr, dc, color)).length;
+}
+
+function lineHasFour(board, row, col, dr, dc, color) {
+  return getLineOffsets(row, col, dr, dc)
+    .filter((offset) => offset !== 0)
+    .some((offset) => {
+      const moveRow = row + dr * offset;
+      const moveCol = col + dc * offset;
+      if (board[moveRow]?.[moveCol] !== EMPTY) return false;
+      board[moveRow][moveCol] = color;
+      const makesFive = hasExactFive(board, moveRow, moveCol, color);
+      board[moveRow][moveCol] = EMPTY;
+      return makesFive;
+    });
 }
 
 function countOpenThreeLines(board, row, col, color) {
-  return getDirections().filter(([dr, dc]) => lineHasOpenThree(board, row, col, dr, dc, color)).length;
+  return getDirections().filter(([dr, dc]) => lineCanBecomeOpenFour(board, row, col, dr, dc, color)).length;
 }
 
-function lineHasOpenThree(board, row, col, dr, dc, color) {
-  const cells = [];
-  for (let offset = -5; offset <= 5; offset += 1) {
+function lineCanBecomeOpenFour(board, row, col, dr, dc, color) {
+  return getLineOffsets(row, col, dr, dc)
+    .filter((offset) => offset !== 0)
+    .some((offset) => {
+      const moveRow = row + dr * offset;
+      const moveCol = col + dc * offset;
+      if (board[moveRow]?.[moveCol] !== EMPTY) return false;
+      board[moveRow][moveCol] = color;
+      const openFour = lineIsOpenFour(board, moveRow, moveCol, dr, dc, color);
+      board[moveRow][moveCol] = EMPTY;
+      return openFour;
+    });
+}
+
+function lineIsOpenFour(board, row, col, dr, dc, color) {
+  const forward = countDirection(board, row, col, dr, dc, color);
+  const backward = countDirection(board, row, col, -dr, -dc, color);
+  const count = 1 + forward + backward;
+  if (count !== 4) return false;
+
+  const forwardEnd = getCell(board, row + dr * (forward + 1), col + dc * (forward + 1));
+  const backwardEnd = getCell(board, row - dr * (backward + 1), col - dc * (backward + 1));
+  return forwardEnd === EMPTY && backwardEnd === EMPTY;
+}
+
+function getCell(board, row, col) {
+  if (row < 0 || row >= BOARD_SIZE || col < 0 || col >= BOARD_SIZE) return null;
+  return board[row][col];
+}
+
+function getLineOffsets(row, col, dr, dc) {
+  const offsets = [];
+  for (let offset = -4; offset <= 4; offset += 1) {
     const currentRow = row + dr * offset;
     const currentCol = col + dc * offset;
-    if (currentRow < 0 || currentRow >= BOARD_SIZE || currentCol < 0 || currentCol >= BOARD_SIZE) {
-      cells.push("#");
-    } else if (board[currentRow][currentCol] === EMPTY) {
-      cells.push(".");
-    } else if (board[currentRow][currentCol] === color) {
-      cells.push("X");
-    } else {
-      cells.push("O");
+    if (currentRow >= 0 && currentRow < BOARD_SIZE && currentCol >= 0 && currentCol < BOARD_SIZE) {
+      offsets.push(offset);
     }
   }
-  const line = cells.join("");
-  return /(^|[.#O])\.XXX\.([.#O]|$)/.test(line) || /(^|[.#O])\.XX\.X\.([.#O]|$)/.test(line) || /(^|[.#O])\.X\.XX\.([.#O]|$)/.test(line);
-}
-
-function getNearbyEmptyCells(board, row, col, radius) {
-  const cells = [];
-  for (let nextRow = Math.max(0, row - radius); nextRow <= Math.min(BOARD_SIZE - 1, row + radius); nextRow += 1) {
-    for (let nextCol = Math.max(0, col - radius); nextCol <= Math.min(BOARD_SIZE - 1, col + radius); nextCol += 1) {
-      if (board[nextRow][nextCol] === EMPTY) cells.push({ row: nextRow, col: nextCol });
-    }
-  }
-  return cells;
+  return offsets;
 }
