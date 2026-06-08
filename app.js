@@ -314,6 +314,7 @@ function resetGame(remote = false) {
   state.moves = [];
   render();
   if (!remote) send({ type: "reset" });
+  if (!remote && state.role === "ai") queueAiMove();
 }
 
 function render() {
