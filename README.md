@@ -28,6 +28,11 @@ window.GOMOKU_SUPABASE = {
 
 点击“AI对战”即可和 AI 下棋。玩家颜色使用“我执黑 / 我执白”的选择。
 
+规则可以选择：
+
+- 自由规则：黑白都没有禁手，五连或以上获胜。
+- 禁手规则：黑棋三三、四四、长连判禁手；白棋无禁手。
+
 线上部署后，AI 会通过 Netlify Function 调用 DeepSeek API。需要在 Netlify 添加环境变量：
 
 ```text

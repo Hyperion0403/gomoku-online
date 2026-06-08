@@ -285,17 +285,20 @@ h2 {
 
 .room-row,
 .actions,
-.color-pick {
+.color-pick,
+.rule-pick {
   display: grid;
   gap: 10px;
 }
 
-.color-pick {
+.color-pick,
+.rule-pick {
   grid-template-columns: 1fr 1fr;
   margin-bottom: 10px;
 }
 
-.color-choice {
+.color-choice,
+.rule-choice {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -305,11 +308,13 @@ h2 {
   border: 1px solid #eadfce;
 }
 
-.color-choice:hover {
+.color-choice:hover,
+.rule-choice:hover {
   background: #f3eadc;
 }
 
-.color-choice.active {
+.color-choice.active,
+.rule-choice.active {
   color: #fff;
   background: var(--accent);
   border-color: var(--accent);
@@ -439,7 +444,8 @@ input:focus {
 
   .actions,
   .room-row,
-  .color-pick {
+  .color-pick,
+  .rule-pick {
     grid-template-columns: 1fr;
   }
 }

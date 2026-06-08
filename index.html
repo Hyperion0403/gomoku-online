@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="./styles.css" />
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
     <script src="./config.js" defer></script>
-    <script src="./app.js?v=11" defer></script>
+    <script src="./app.js?v=12" defer></script>
   </head>
   <body>
     <main class="shell">
@@ -41,6 +41,10 @@
               <span class="stone white" aria-hidden="true"></span>
               我执白
             </button>
+          </div>
+          <div class="rule-pick" role="group" aria-label="规则选择">
+            <button id="freeRuleBtn" class="rule-choice active" type="button">自由规则</button>
+            <button id="renjuRuleBtn" class="rule-choice" type="button">禁手规则</button>
           </div>
           <div class="room-row">
             <input id="roomInput" type="text" autocomplete="off" spellcheck="false" placeholder="输入房间码" aria-label="房间码" />

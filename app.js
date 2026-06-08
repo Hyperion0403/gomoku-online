@@ -27,6 +27,8 @@ const els = {
   localBtn: document.querySelector("#localBtn"),
   blackPickBtn: document.querySelector("#blackPickBtn"),
   whitePickBtn: document.querySelector("#whitePickBtn"),
+  freeRuleBtn: document.querySelector("#freeRuleBtn"),
+  renjuRuleBtn: document.querySelector("#renjuRuleBtn"),
   shareHint: document.querySelector("#shareHint"),
   undoBtn: document.querySelector("#undoBtn"),
   resetBtn: document.querySelector("#resetBtn"),
@@ -41,6 +43,8 @@ const state = {
   winner: EMPTY,
   moves: [],
   score: { [BLACK]: 0, [WHITE]: 0 },
+  ruleMode: "freestyle",
+  forbiddenReason: "",
   role: "local",
   preferredColor: BLACK,
   playerColor: EMPTY,
@@ -67,6 +71,10 @@ function colorParam(color) {
 
 function parseColorParam(value, fallback = BLACK) {
   return value === "white" ? WHITE : value === "black" ? BLACK : fallback;
+}
+
+function parseRuleParam(value, fallback = "freestyle") {
+  return value === "renju" ? "renju" : value === "freestyle" ? "freestyle" : fallback;
 }
 
 function other(color) {
@@ -104,12 +112,13 @@ function handleMove(row, col, remote = false) {
 
   const color = state.turn;
   state.board[row][col] = color;
-  state.moves.push({ row, col, color });
-  const winner = getWinner(row, col, color);
+  const result = getMoveResult(row, col, color);
+  state.moves.push({ row, col, color, forbidden: result.forbiddenReason });
 
-  if (winner) {
-    state.winner = color;
-    state.score[color] += 1;
+  if (result.winner) {
+    state.winner = result.winner;
+    state.forbiddenReason = result.forbiddenReason || "";
+    state.score[result.winner] += 1;
   } else {
     state.turn = other(state.turn);
   }
@@ -148,6 +157,100 @@ function getWinner(row, col, color) {
   });
 }
 
+function getMoveResult(row, col, color) {
+  if (state.ruleMode === "renju" && color === BLACK) {
+    const exactFive = hasExactFive(row, col, color);
+    if (exactFive) return { winner: BLACK, forbiddenReason: "" };
+
+    const forbiddenReason = getForbiddenReason(row, col);
+    if (forbiddenReason) return { winner: WHITE, forbiddenReason };
+    return { winner: EMPTY, forbiddenReason: "" };
+  }
+
+  return { winner: getWinner(row, col, color) ? color : EMPTY, forbiddenReason: "" };
+}
+
+function hasExactFive(row, col, color) {
+  return getDirections().some(([dr, dc]) => 1 + countDirection(row, col, dr, dc, color) + countDirection(row, col, -dr, -dc, color) === 5);
+}
+
+function getDirections() {
+  return [
+    [1, 0],
+    [0, 1],
+    [1, 1],
+    [1, -1],
+  ];
+}
+
+function getForbiddenReason(row, col) {
+  if (state.ruleMode !== "renju" || state.board[row][col] !== BLACK) return "";
+  if (getDirections().some(([dr, dc]) => 1 + countDirection(row, col, dr, dc, BLACK) + countDirection(row, col, -dr, -dc, BLACK) >= 6)) {
+    return "长连";
+  }
+  if (countFourThreats(row, col, BLACK) >= 2) return "四四";
+  if (countOpenThreeLines(row, col, BLACK) >= 2) return "三三";
+  return "";
+}
+
+function countFourThreats(row, col, color) {
+  const threats = new Set();
+  getNearbyEmptyCells(row, col, 4).forEach((move) => {
+    state.board[move.row][move.col] = color;
+    const makesFive = hasExactFive(move.row, move.col, color);
+    state.board[move.row][move.col] = EMPTY;
+    if (makesFive) threats.add(`${move.row},${move.col}`);
+  });
+  return threats.size;
+}
+
+function countOpenThreeLines(row, col, color) {
+  return getDirections().filter(([dr, dc]) => lineHasOpenThree(row, col, dr, dc, color)).length;
+}
+
+function lineHasOpenThree(row, col, dr, dc, color) {
+  const cells = [];
+  for (let offset = -5; offset <= 5; offset += 1) {
+    const currentRow = row + dr * offset;
+    const currentCol = col + dc * offset;
+    if (currentRow < 0 || currentRow >= BOARD_SIZE || currentCol < 0 || currentCol >= BOARD_SIZE) {
+      cells.push("#");
+    } else if (state.board[currentRow][currentCol] === EMPTY) {
+      cells.push(".");
+    } else if (state.board[currentRow][currentCol] === color) {
+      cells.push("X");
+    } else {
+      cells.push("O");
+    }
+  }
+
+  const line = cells.join("");
+  return /(^|[.#O])\.XXX\.([.#O]|$)/.test(line) || /(^|[.#O])\.XX\.X\.([.#O]|$)/.test(line) || /(^|[.#O])\.X\.XX\.([.#O]|$)/.test(line);
+}
+
+function getNearbyEmptyCells(row, col, radius) {
+  const cells = [];
+  const seen = new Set();
+  for (let nextRow = Math.max(0, row - radius); nextRow <= Math.min(BOARD_SIZE - 1, row + radius); nextRow += 1) {
+    for (let nextCol = Math.max(0, col - radius); nextCol <= Math.min(BOARD_SIZE - 1, col + radius); nextCol += 1) {
+      const key = `${nextRow},${nextCol}`;
+      if (state.board[nextRow][nextCol] === EMPTY && !seen.has(key)) {
+        seen.add(key);
+        cells.push({ row: nextRow, col: nextCol });
+      }
+    }
+  }
+  return cells;
+}
+
+function isLegalMoveForColor(row, col, color) {
+  if (state.board[row]?.[col] !== EMPTY) return false;
+  state.board[row][col] = color;
+  const forbidden = state.ruleMode === "renju" && color === BLACK && !hasExactFive(row, col, color) && Boolean(getForbiddenReason(row, col));
+  state.board[row][col] = EMPTY;
+  return !forbidden;
+}
+
 function countDirection(row, col, dr, dc, color) {
   let count = 0;
   let nextRow = row + dr;
@@ -173,6 +276,7 @@ function undo(remote = false) {
   const last = state.moves.pop();
   state.board[last.row][last.col] = EMPTY;
   state.winner = EMPTY;
+  state.forbiddenReason = "";
   state.turn = last.color;
   render();
   if (!remote) send({ type: "undo" });
@@ -182,6 +286,7 @@ function resetGame(remote = false) {
   state.board = createEmptyBoard();
   state.turn = BLACK;
   state.winner = EMPTY;
+  state.forbiddenReason = "";
   state.moves = [];
   render();
   if (!remote) send({ type: "reset" });
@@ -204,7 +309,7 @@ function render() {
 
   els.turnCard.querySelector(".stone").className = `stone ${state.turn === BLACK ? "black" : "white"}`;
   els.turnText.textContent = state.winner
-    ? `${colorName(state.winner)}获胜`
+    ? `${colorName(state.winner)}获胜${state.forbiddenReason ? `（黑棋${state.forbiddenReason}禁手）` : ""}`
     : `${colorName(state.turn)}落子${getTurnSuffix()}`;
   els.blackScore.textContent = String(state.score[BLACK]);
   els.whiteScore.textContent = String(state.score[WHITE]);
@@ -226,7 +331,7 @@ function updateMoves() {
   const recentMoves = state.moves.slice(-18).reverse();
   recentMoves.forEach((move) => {
     const item = document.createElement("li");
-    item.textContent = `${colorName(move.color)}：${move.row + 1}, ${move.col + 1}`;
+    item.textContent = `${colorName(move.color)}：${move.row + 1}, ${move.col + 1}${move.forbidden ? `（${move.forbidden}禁手）` : ""}`;
     els.movesList.append(item);
   });
 }
@@ -240,6 +345,7 @@ function getInviteUrl(roomId) {
   const url = new URL(window.location.href);
   url.searchParams.set("room", roomId);
   url.searchParams.set("hostColor", colorParam(state.hostColor));
+  url.searchParams.set("rule", state.ruleMode);
   return url.toString();
 }
 
@@ -258,7 +364,7 @@ function startAiGame() {
   state.aiColor = other(state.playerColor);
   resetScores();
   resetGame(true);
-  setNetworkStatus(`AI对战：你执${colorName(state.playerColor).replace("棋", "")}`);
+  setNetworkStatus(`AI对战：你执${colorName(state.playerColor).replace("棋", "")}，${getRuleLabel()}`);
   els.shareHint.textContent = "AI会优先使用 DeepSeek；接口不可用时会用本地算法临时落子。";
   render();
   queueAiMove();
@@ -268,8 +374,8 @@ function startLocalGame() {
   closeConnection();
   resetScores();
   resetGame(true);
-  setNetworkStatus("本地模式");
-  els.shareHint.textContent = "本地双人轮流落子。";
+  setNetworkStatus(`本地模式：${getRuleLabel()}`);
+  els.shareHint.textContent = "本地双人轮流落子；禁手规则下黑棋三三、四四、长连判负。";
 }
 
 function hostRoom() {
@@ -288,11 +394,15 @@ function hostRoom() {
   els.roomInput.value = state.roomId;
   window.history.replaceState(null, "", getInviteUrl(state.roomId));
   setNetworkStatus(`房间 ${state.roomId} 等待好友`);
-  els.shareHint.textContent = `你执${colorName(state.playerColor).replace("棋", "")}。好友打开邀请链接后会执另一方。`;
+  els.shareHint.textContent = `你执${colorName(state.playerColor).replace("棋", "")}，${getRuleLabel()}。好友打开邀请链接后会执另一方。`;
   openRealtimeRoom(state.roomId, "host");
 }
 
-function joinRoom(roomId = els.roomInput.value.trim(), hostColor = parseColorParam(new URLSearchParams(window.location.search).get("hostColor"), other(state.preferredColor))) {
+function joinRoom(
+  roomId = els.roomInput.value.trim(),
+  hostColor = parseColorParam(new URLSearchParams(window.location.search).get("hostColor"), other(state.preferredColor)),
+  ruleMode = parseRuleParam(new URLSearchParams(window.location.search).get("rule"), state.ruleMode),
+) {
   if (!roomId) return;
   if (!hasSupabaseConfig()) {
     setNetworkStatus("请先填写 Supabase 配置");
@@ -304,6 +414,7 @@ function joinRoom(roomId = els.roomInput.value.trim(), hostColor = parseColorPar
   state.role = "guest";
   state.hostColor = hostColor;
   state.playerColor = other(hostColor);
+  setRuleMode(ruleMode);
   resetScores();
   resetGame(true);
   setNetworkStatus(`正在连接房间 ${roomId}`);
@@ -330,7 +441,7 @@ function openRealtimeRoom(roomId, role) {
     .on("presence", { event: "sync" }, () => updatePresenceStatus())
     .subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
-        await state.channel.track({ role, color: colorParam(state.playerColor), joinedAt: Date.now() });
+        await state.channel.track({ role, color: colorParam(state.playerColor), rule: state.ruleMode, joinedAt: Date.now() });
         setNetworkStatus(role === "host" ? `房间 ${roomId} 等待好友` : `已加入房间 ${roomId}`);
         if (role === "guest") send({ type: "hello" });
         render();
@@ -406,6 +517,7 @@ function serializeGame() {
     moves: state.moves,
     score: state.score,
     hostColor: state.hostColor,
+    ruleMode: state.ruleMode,
   };
 }
 
@@ -417,6 +529,7 @@ function hydrateGame(payload) {
   state.moves = payload.moves || [];
   state.score = payload.score || { [BLACK]: 0, [WHITE]: 0 };
   state.hostColor = payload.hostColor || state.hostColor;
+  setRuleMode(payload.ruleMode || state.ruleMode);
   if (state.role === "guest") state.playerColor = other(state.hostColor);
   render();
 }
@@ -457,6 +570,8 @@ function wireControls() {
   els.localBtn.addEventListener("click", startLocalGame);
   els.blackPickBtn.addEventListener("click", () => setPreferredColor(BLACK));
   els.whitePickBtn.addEventListener("click", () => setPreferredColor(WHITE));
+  els.freeRuleBtn.addEventListener("click", () => setRuleMode("freestyle"));
+  els.renjuRuleBtn.addEventListener("click", () => setRuleMode("renju"));
   els.undoBtn.addEventListener("click", () => undo());
   els.resetBtn.addEventListener("click", () => resetGame());
   els.roomInput.addEventListener("keydown", (event) => {
@@ -466,10 +581,12 @@ function wireControls() {
   const roomFromUrl = new URLSearchParams(window.location.search).get("room");
   if (roomFromUrl) {
     const hostColor = parseColorParam(new URLSearchParams(window.location.search).get("hostColor"), BLACK);
+    const ruleMode = parseRuleParam(new URLSearchParams(window.location.search).get("rule"), "freestyle");
     els.roomInput.value = roomFromUrl;
     setPreferredColor(other(hostColor));
+    setRuleMode(ruleMode);
     setTimeout(() => {
-      if (state.role === "local") joinRoom(roomFromUrl, hostColor);
+      if (state.role === "local") joinRoom(roomFromUrl, hostColor, ruleMode);
     }, 0);
   }
 }
@@ -480,9 +597,20 @@ function setPreferredColor(color) {
   els.whitePickBtn.classList.toggle("active", color === WHITE);
 }
 
+function setRuleMode(ruleMode) {
+  state.ruleMode = parseRuleParam(ruleMode);
+  els.freeRuleBtn.classList.toggle("active", state.ruleMode === "freestyle");
+  els.renjuRuleBtn.classList.toggle("active", state.ruleMode === "renju");
+}
+
+function getRuleLabel() {
+  return state.ruleMode === "renju" ? "禁手规则" : "自由规则";
+}
+
 buildBoard();
 wireControls();
 setPreferredColor(BLACK);
+setRuleMode("freestyle");
 render();
 
 async function queueAiMove() {
@@ -509,6 +637,7 @@ async function getAiMove() {
         board: state.board,
         aiColor: state.aiColor,
         playerColor: state.playerColor,
+        ruleMode: state.ruleMode,
         moves: state.moves,
       }),
     });
@@ -533,7 +662,8 @@ function isValidMove(move) {
     move.row < BOARD_SIZE &&
     move.col >= 0 &&
     move.col < BOARD_SIZE &&
-    state.board[move.row][move.col] === EMPTY
+    state.board[move.row][move.col] === EMPTY &&
+    isLegalMoveForColor(move.row, move.col, state.aiColor)
   );
 }
 
@@ -549,7 +679,7 @@ function getFallbackMove(color) {
   const candidates = [];
   for (let row = 0; row < BOARD_SIZE; row += 1) {
     for (let col = 0; col < BOARD_SIZE; col += 1) {
-      if (state.board[row][col] === EMPTY) {
+      if (state.board[row][col] === EMPTY && isLegalMoveForColor(row, col, color)) {
         candidates.push({
           row,
           col,
@@ -565,7 +695,7 @@ function getFallbackMove(color) {
 function findTacticalMove(color) {
   for (let row = 0; row < BOARD_SIZE; row += 1) {
     for (let col = 0; col < BOARD_SIZE; col += 1) {
-      if (state.board[row][col] !== EMPTY) continue;
+      if (state.board[row][col] !== EMPTY || !isLegalMoveForColor(row, col, color)) continue;
       state.board[row][col] = color;
       const wins = getWinner(row, col, color);
       state.board[row][col] = EMPTY;
@@ -577,16 +707,42 @@ function findTacticalMove(color) {
 
 function scorePosition(row, col, color) {
   const opponent = other(color);
-  const directions = [
-    [1, 0],
-    [0, 1],
-    [1, 1],
-    [1, -1],
-  ];
+  return evaluatePlacement(row, col, color) + evaluatePlacement(row, col, opponent) * 1.18;
+}
 
-  return directions.reduce((total, [dr, dc]) => {
-    const own = countDirection(row, col, dr, dc, color) + countDirection(row, col, -dr, -dc, color);
-    const threat = countDirection(row, col, dr, dc, opponent) + countDirection(row, col, -dr, -dc, opponent);
-    return total + own * own * 2 + threat * threat * 2.4;
+function evaluatePlacement(row, col, color) {
+  state.board[row][col] = color;
+  const score = getDirections().reduce((total, [dr, dc]) => {
+    const info = getLineInfo(row, col, dr, dc, color);
+    return total + scoreLineInfo(info.count, info.openEnds);
   }, 0);
+  state.board[row][col] = EMPTY;
+  return score;
+}
+
+function getLineInfo(row, col, dr, dc, color) {
+  const forward = countDirection(row, col, dr, dc, color);
+  const backward = countDirection(row, col, -dr, -dc, color);
+  const forwardEnd = getCell(row + dr * (forward + 1), col + dc * (forward + 1));
+  const backwardEnd = getCell(row - dr * (backward + 1), col - dc * (backward + 1));
+  return {
+    count: 1 + forward + backward,
+    openEnds: Number(forwardEnd === EMPTY) + Number(backwardEnd === EMPTY),
+  };
+}
+
+function getCell(row, col) {
+  if (row < 0 || row >= BOARD_SIZE || col < 0 || col >= BOARD_SIZE) return null;
+  return state.board[row][col];
+}
+
+function scoreLineInfo(count, openEnds) {
+  if (count >= 5) return 1_000_000;
+  if (count === 4 && openEnds === 2) return 120_000;
+  if (count === 4 && openEnds === 1) return 28_000;
+  if (count === 3 && openEnds === 2) return 9_000;
+  if (count === 3 && openEnds === 1) return 1_800;
+  if (count === 2 && openEnds === 2) return 900;
+  if (count === 2 && openEnds === 1) return 160;
+  return openEnds * 18 + count * 8;
 }
