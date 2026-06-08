@@ -21,7 +21,26 @@ window.GOMOKU_SUPABASE = {
 2. 在 Netlify 新建站点，选择这个 GitHub 仓库。
 3. Build command 留空。
 4. Publish directory 填 `.`。
-5. 部署完成后打开站点，先选择“我执黑”或“我执白”，再点击“创建房间”，复制邀请链接给好友。
+5. 在 Netlify 的 Site settings 里添加环境变量 `DEEPSEEK_API_KEY`。
+6. 部署完成后打开站点，先选择“我执黑”或“我执白”，再点击“创建房间”，复制邀请链接给好友。
+
+## AI 对战
+
+点击“AI对战”即可和 AI 下棋。玩家颜色使用“我执黑 / 我执白”的选择。
+
+线上部署后，AI 会通过 Netlify Function 调用 DeepSeek API。需要在 Netlify 添加环境变量：
+
+```text
+DEEPSEEK_API_KEY=你的 DeepSeek API Key
+```
+
+可选环境变量：
+
+```text
+DEEPSEEK_MODEL=deepseek-chat
+```
+
+如果本地静态预览没有 Netlify Function，页面会自动使用本地兜底算法落子。
 
 ## 本地预览
 

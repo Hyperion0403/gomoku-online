@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="./styles.css" />
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
     <script src="./config.js" defer></script>
-    <script src="./app.js?v=10" defer></script>
+    <script src="./app.js?v=11" defer></script>
   </head>
   <body>
     <main class="shell">
@@ -49,6 +49,10 @@
           <div class="actions">
             <button id="hostBtn">创建房间</button>
             <button id="copyBtn" class="secondary">复制邀请链接</button>
+          </div>
+          <div class="actions solo-actions">
+            <button id="aiBtn" class="secondary">AI对战</button>
+            <button id="localBtn" class="secondary">本地双人</button>
           </div>
           <p class="hint" id="shareHint">配置 Supabase 后，把邀请链接发给好友即可对战。</p>
         </section>

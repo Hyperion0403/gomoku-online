@@ -23,6 +23,8 @@ const els = {
   hostBtn: document.querySelector("#hostBtn"),
   joinBtn: document.querySelector("#joinBtn"),
   copyBtn: document.querySelector("#copyBtn"),
+  aiBtn: document.querySelector("#aiBtn"),
+  localBtn: document.querySelector("#localBtn"),
   blackPickBtn: document.querySelector("#blackPickBtn"),
   whitePickBtn: document.querySelector("#whitePickBtn"),
   shareHint: document.querySelector("#shareHint"),
@@ -42,6 +44,8 @@ const state = {
   role: "local",
   preferredColor: BLACK,
   playerColor: EMPTY,
+  aiColor: EMPTY,
+  aiThinking: false,
   hostColor: BLACK,
   clientId: crypto.randomUUID(),
   supabaseClient: null,
@@ -112,13 +116,20 @@ function handleMove(row, col, remote = false) {
 
   render();
   if (!remote) send({ type: "move", row, col });
+  if (!remote) queueAiMove();
   return true;
 }
 
 function isMyTurn() {
   if (state.role === "local") return true;
+  if (state.role === "ai") return state.playerColor === state.turn && !state.aiThinking;
   if (!state.channel) return false;
   return state.playerColor === state.turn;
+}
+
+function canPlaceManually() {
+  if (state.role === "ai") return state.playerColor === state.turn && !state.aiThinking;
+  return isMyTurn();
 }
 
 function getWinner(row, col, color) {
@@ -185,7 +196,7 @@ function render() {
     const col = Number(cell.dataset.col);
     const value = state.board[row][col];
     cell.className = "point";
-    cell.disabled = Boolean(value) || Boolean(state.winner) || !isMyTurn();
+    cell.disabled = Boolean(value) || Boolean(state.winner) || !canPlaceManually();
     cell.classList.add(value === BLACK ? "black" : value === WHITE ? "white" : "empty");
     cell.classList.toggle("last", Boolean(last && last.row === row && last.col === col));
     cell.style.color = state.turn === BLACK ? "#15171b" : "#f2eee6";
@@ -194,11 +205,20 @@ function render() {
   els.turnCard.querySelector(".stone").className = `stone ${state.turn === BLACK ? "black" : "white"}`;
   els.turnText.textContent = state.winner
     ? `${colorName(state.winner)}获胜`
-    : `${colorName(state.turn)}落子${state.role === "local" ? "" : isMyTurn() ? "，轮到你" : "，等待对方"}`;
+    : `${colorName(state.turn)}落子${getTurnSuffix()}`;
   els.blackScore.textContent = String(state.score[BLACK]);
   els.whiteScore.textContent = String(state.score[WHITE]);
   els.undoBtn.disabled = !state.moves.length || state.role !== "local";
   updateMoves();
+}
+
+function getTurnSuffix() {
+  if (state.role === "local") return "";
+  if (state.role === "ai") {
+    if (state.aiThinking) return "，AI思考中";
+    return state.turn === state.playerColor ? "，轮到你" : "，等待AI";
+  }
+  return isMyTurn() ? "，轮到你" : "，等待对方";
 }
 
 function updateMoves() {
@@ -229,6 +249,27 @@ function setNetworkStatus(text) {
 
 function resetScores() {
   state.score = { [BLACK]: 0, [WHITE]: 0 };
+}
+
+function startAiGame() {
+  closeConnection();
+  state.role = "ai";
+  state.playerColor = state.preferredColor;
+  state.aiColor = other(state.playerColor);
+  resetScores();
+  resetGame(true);
+  setNetworkStatus(`AI对战：你执${colorName(state.playerColor).replace("棋", "")}`);
+  els.shareHint.textContent = "AI会优先使用 DeepSeek；接口不可用时会用本地算法临时落子。";
+  render();
+  queueAiMove();
+}
+
+function startLocalGame() {
+  closeConnection();
+  resetScores();
+  resetGame(true);
+  setNetworkStatus("本地模式");
+  els.shareHint.textContent = "本地双人轮流落子。";
 }
 
 function hostRoom() {
@@ -388,6 +429,8 @@ function closeConnection() {
   state.supabaseClient = null;
   state.role = "local";
   state.playerColor = EMPTY;
+  state.aiColor = EMPTY;
+  state.aiThinking = false;
 }
 
 async function copyInvite() {
@@ -410,6 +453,8 @@ function wireControls() {
   els.hostBtn.addEventListener("click", hostRoom);
   els.joinBtn.addEventListener("click", () => joinRoom());
   els.copyBtn.addEventListener("click", copyInvite);
+  els.aiBtn.addEventListener("click", startAiGame);
+  els.localBtn.addEventListener("click", startLocalGame);
   els.blackPickBtn.addEventListener("click", () => setPreferredColor(BLACK));
   els.whitePickBtn.addEventListener("click", () => setPreferredColor(WHITE));
   els.undoBtn.addEventListener("click", () => undo());
@@ -439,3 +484,109 @@ buildBoard();
 wireControls();
 setPreferredColor(BLACK);
 render();
+
+async function queueAiMove() {
+  if (state.role !== "ai" || state.winner || state.turn !== state.aiColor || state.aiThinking) return;
+
+  state.aiThinking = true;
+  render();
+
+  const move = await getAiMove();
+  state.aiThinking = false;
+
+  if (!state.winner && move && state.board[move.row]?.[move.col] === EMPTY) {
+    handleMove(move.row, move.col, true);
+  }
+  render();
+}
+
+async function getAiMove() {
+  try {
+    const response = await fetch("/api/deepseek-move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        board: state.board,
+        aiColor: state.aiColor,
+        playerColor: state.playerColor,
+        moves: state.moves,
+      }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (isValidMove(data.move)) return data.move;
+    }
+  } catch {
+    // Static local preview has no Netlify Function; fall through to local fallback.
+  }
+
+  return getFallbackMove(state.aiColor);
+}
+
+function isValidMove(move) {
+  return (
+    move &&
+    Number.isInteger(move.row) &&
+    Number.isInteger(move.col) &&
+    move.row >= 0 &&
+    move.row < BOARD_SIZE &&
+    move.col >= 0 &&
+    move.col < BOARD_SIZE &&
+    state.board[move.row][move.col] === EMPTY
+  );
+}
+
+function getFallbackMove(color) {
+  const opponent = other(color);
+  const winningMove = findTacticalMove(color);
+  if (winningMove) return winningMove;
+
+  const blockingMove = findTacticalMove(opponent);
+  if (blockingMove) return blockingMove;
+
+  const center = Math.floor(BOARD_SIZE / 2);
+  const candidates = [];
+  for (let row = 0; row < BOARD_SIZE; row += 1) {
+    for (let col = 0; col < BOARD_SIZE; col += 1) {
+      if (state.board[row][col] === EMPTY) {
+        candidates.push({
+          row,
+          col,
+          score: scorePosition(row, col, color) - Math.hypot(row - center, col - center) * 0.12,
+        });
+      }
+    }
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0] || null;
+}
+
+function findTacticalMove(color) {
+  for (let row = 0; row < BOARD_SIZE; row += 1) {
+    for (let col = 0; col < BOARD_SIZE; col += 1) {
+      if (state.board[row][col] !== EMPTY) continue;
+      state.board[row][col] = color;
+      const wins = getWinner(row, col, color);
+      state.board[row][col] = EMPTY;
+      if (wins) return { row, col };
+    }
+  }
+  return null;
+}
+
+function scorePosition(row, col, color) {
+  const opponent = other(color);
+  const directions = [
+    [1, 0],
+    [0, 1],
+    [1, 1],
+    [1, -1],
+  ];
+
+  return directions.reduce((total, [dr, dc]) => {
+    const own = countDirection(row, col, dr, dc, color) + countDirection(row, col, -dr, -dc, color);
+    const threat = countDirection(row, col, dr, dc, opponent) + countDirection(row, col, -dr, -dc, opponent);
+    return total + own * own * 2 + threat * threat * 2.4;
+  }, 0);
+}
