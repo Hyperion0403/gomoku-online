@@ -284,9 +284,39 @@ h2 {
 }
 
 .room-row,
-.actions {
+.actions,
+.color-pick {
   display: grid;
   gap: 10px;
+}
+
+.color-pick {
+  grid-template-columns: 1fr 1fr;
+  margin-bottom: 10px;
+}
+
+.color-choice {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--ink);
+  background: #fffcf7;
+  border: 1px solid #eadfce;
+}
+
+.color-choice:hover {
+  background: #f3eadc;
+}
+
+.color-choice.active {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.color-choice.active .stone.white {
+  border-color: rgba(255, 255, 255, 0.7);
 }
 
 .room-row {
@@ -404,7 +434,8 @@ input:focus {
   }
 
   .actions,
-  .room-row {
+  .room-row,
+  .color-pick {
     grid-template-columns: 1fr;
   }
 }

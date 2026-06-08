@@ -21,7 +21,7 @@ window.GOMOKU_SUPABASE = {
 2. 在 Netlify 新建站点，选择这个 GitHub 仓库。
 3. Build command 留空。
 4. Publish directory 填 `.`。
-5. 部署完成后打开站点，点击“创建房间”，复制邀请链接给好友。
+5. 部署完成后打开站点，先选择“我执黑”或“我执白”，再点击“创建房间”，复制邀请链接给好友。
 
 ## 本地预览
 

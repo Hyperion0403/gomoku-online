@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="./styles.css" />
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
     <script src="./config.js" defer></script>
-    <script src="./app.js?v=9" defer></script>
+    <script src="./app.js?v=10" defer></script>
   </head>
   <body>
     <main class="shell">
@@ -32,6 +32,16 @@
         <section class="section">
           <h2>房间</h2>
           <div class="status" id="networkStatus">本地模式</div>
+          <div class="color-pick" role="group" aria-label="联机执棋选择">
+            <button id="blackPickBtn" class="color-choice active" type="button">
+              <span class="stone black" aria-hidden="true"></span>
+              我执黑
+            </button>
+            <button id="whitePickBtn" class="color-choice" type="button">
+              <span class="stone white" aria-hidden="true"></span>
+              我执白
+            </button>
+          </div>
           <div class="room-row">
             <input id="roomInput" type="text" autocomplete="off" spellcheck="false" placeholder="输入房间码" aria-label="房间码" />
             <button id="joinBtn" class="secondary">加入</button>

@@ -23,6 +23,8 @@ const els = {
   hostBtn: document.querySelector("#hostBtn"),
   joinBtn: document.querySelector("#joinBtn"),
   copyBtn: document.querySelector("#copyBtn"),
+  blackPickBtn: document.querySelector("#blackPickBtn"),
+  whitePickBtn: document.querySelector("#whitePickBtn"),
   shareHint: document.querySelector("#shareHint"),
   undoBtn: document.querySelector("#undoBtn"),
   resetBtn: document.querySelector("#resetBtn"),
@@ -38,6 +40,9 @@ const state = {
   moves: [],
   score: { [BLACK]: 0, [WHITE]: 0 },
   role: "local",
+  preferredColor: BLACK,
+  playerColor: EMPTY,
+  hostColor: BLACK,
   clientId: crypto.randomUUID(),
   supabaseClient: null,
   channel: null,
@@ -50,6 +55,14 @@ function createEmptyBoard() {
 
 function colorName(color) {
   return color === BLACK ? "黑棋" : "白棋";
+}
+
+function colorParam(color) {
+  return color === WHITE ? "white" : "black";
+}
+
+function parseColorParam(value, fallback = BLACK) {
+  return value === "white" ? WHITE : value === "black" ? BLACK : fallback;
 }
 
 function other(color) {
@@ -105,7 +118,7 @@ function handleMove(row, col, remote = false) {
 function isMyTurn() {
   if (state.role === "local") return true;
   if (!state.channel) return false;
-  return (state.role === "host" && state.turn === BLACK) || (state.role === "guest" && state.turn === WHITE);
+  return state.playerColor === state.turn;
 }
 
 function getWinner(row, col, color) {
@@ -206,6 +219,7 @@ function makeRoomId() {
 function getInviteUrl(roomId) {
   const url = new URL(window.location.href);
   url.searchParams.set("room", roomId);
+  url.searchParams.set("hostColor", colorParam(state.hostColor));
   return url.toString();
 }
 
@@ -226,16 +240,18 @@ function hostRoom() {
   closeConnection();
   state.roomId = makeRoomId();
   state.role = "host";
+  state.hostColor = state.preferredColor;
+  state.playerColor = state.hostColor;
   resetScores();
   resetGame(true);
   els.roomInput.value = state.roomId;
   window.history.replaceState(null, "", getInviteUrl(state.roomId));
   setNetworkStatus(`房间 ${state.roomId} 等待好友`);
-  els.shareHint.textContent = "你执黑先手。好友打开邀请链接后即可连接。";
+  els.shareHint.textContent = `你执${colorName(state.playerColor).replace("棋", "")}。好友打开邀请链接后会执另一方。`;
   openRealtimeRoom(state.roomId, "host");
 }
 
-function joinRoom(roomId = els.roomInput.value.trim()) {
+function joinRoom(roomId = els.roomInput.value.trim(), hostColor = parseColorParam(new URLSearchParams(window.location.search).get("hostColor"), other(state.preferredColor))) {
   if (!roomId) return;
   if (!hasSupabaseConfig()) {
     setNetworkStatus("请先填写 Supabase 配置");
@@ -245,6 +261,8 @@ function joinRoom(roomId = els.roomInput.value.trim()) {
   closeConnection();
   state.roomId = roomId;
   state.role = "guest";
+  state.hostColor = hostColor;
+  state.playerColor = other(hostColor);
   resetScores();
   resetGame(true);
   setNetworkStatus(`正在连接房间 ${roomId}`);
@@ -271,7 +289,7 @@ function openRealtimeRoom(roomId, role) {
     .on("presence", { event: "sync" }, () => updatePresenceStatus())
     .subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
-        await state.channel.track({ role, joinedAt: Date.now() });
+        await state.channel.track({ role, color: colorParam(state.playerColor), joinedAt: Date.now() });
         setNetworkStatus(role === "host" ? `房间 ${roomId} 等待好友` : `已加入房间 ${roomId}`);
         if (role === "guest") send({ type: "hello" });
         render();
@@ -289,7 +307,7 @@ function updatePresenceStatus() {
   const players = Object.values(state.channel.presenceState()).flat();
   const hasOpponent = players.some((player) => player.role && player.role !== state.role);
   if (hasOpponent) {
-    setNetworkStatus(state.role === "host" ? "已连接：你执黑" : "已连接：你执白");
+    setNetworkStatus(`已连接：你执${colorName(state.playerColor).replace("棋", "")}`);
     els.shareHint.textContent = "联机对局中，落子会自动同步。";
     if (state.role === "host") send({ type: "sync", payload: serializeGame() });
   } else {
@@ -302,7 +320,7 @@ function handleRemoteMessage(message) {
   if (!message || typeof message !== "object" || message.from === state.clientId) return;
 
   if (message.type === "hello" && state.role === "host") {
-    setNetworkStatus("已连接：你执黑");
+    setNetworkStatus(`已连接：你执${colorName(state.playerColor).replace("棋", "")}`);
     els.shareHint.textContent = "联机对局中，落子会自动同步。";
     send({ type: "sync", payload: serializeGame() });
     render();
@@ -324,7 +342,7 @@ function handleRemoteMessage(message) {
   if (message.type === "sync") {
     hydrateGame(message.payload);
     if (state.role === "guest") {
-      setNetworkStatus("已连接：你执白");
+      setNetworkStatus(`已连接：你执${colorName(state.playerColor).replace("棋", "")}`);
       els.shareHint.textContent = "联机对局中，落子会自动同步。";
     }
   }
@@ -346,6 +364,7 @@ function serializeGame() {
     winner: state.winner,
     moves: state.moves,
     score: state.score,
+    hostColor: state.hostColor,
   };
 }
 
@@ -356,6 +375,8 @@ function hydrateGame(payload) {
   state.winner = payload.winner || EMPTY;
   state.moves = payload.moves || [];
   state.score = payload.score || { [BLACK]: 0, [WHITE]: 0 };
+  state.hostColor = payload.hostColor || state.hostColor;
+  if (state.role === "guest") state.playerColor = other(state.hostColor);
   render();
 }
 
@@ -366,6 +387,7 @@ function closeConnection() {
   state.channel = null;
   state.supabaseClient = null;
   state.role = "local";
+  state.playerColor = EMPTY;
 }
 
 async function copyInvite() {
@@ -388,6 +410,8 @@ function wireControls() {
   els.hostBtn.addEventListener("click", hostRoom);
   els.joinBtn.addEventListener("click", () => joinRoom());
   els.copyBtn.addEventListener("click", copyInvite);
+  els.blackPickBtn.addEventListener("click", () => setPreferredColor(BLACK));
+  els.whitePickBtn.addEventListener("click", () => setPreferredColor(WHITE));
   els.undoBtn.addEventListener("click", () => undo());
   els.resetBtn.addEventListener("click", () => resetGame());
   els.roomInput.addEventListener("keydown", (event) => {
@@ -396,13 +420,22 @@ function wireControls() {
 
   const roomFromUrl = new URLSearchParams(window.location.search).get("room");
   if (roomFromUrl) {
+    const hostColor = parseColorParam(new URLSearchParams(window.location.search).get("hostColor"), BLACK);
     els.roomInput.value = roomFromUrl;
+    setPreferredColor(other(hostColor));
     setTimeout(() => {
-      if (state.role === "local") joinRoom(roomFromUrl);
+      if (state.role === "local") joinRoom(roomFromUrl, hostColor);
     }, 0);
   }
 }
 
+function setPreferredColor(color) {
+  state.preferredColor = color;
+  els.blackPickBtn.classList.toggle("active", color === BLACK);
+  els.whitePickBtn.classList.toggle("active", color === WHITE);
+}
+
 buildBoard();
 wireControls();
+setPreferredColor(BLACK);
 render();
