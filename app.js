@@ -55,6 +55,8 @@ const state = {
   supabaseClient: null,
   channel: null,
   roomId: "",
+  peerConnected: false,
+  helloTimer: null,
 };
 
 function createEmptyBoard() {
@@ -132,7 +134,7 @@ function handleMove(row, col, remote = false) {
 function isMyTurn() {
   if (state.role === "local") return true;
   if (state.role === "ai") return state.playerColor === state.turn && !state.aiThinking;
-  if (!state.channel) return false;
+  if (!state.channel || !state.peerConnected) return false;
   return state.playerColor === state.turn;
 }
 
@@ -414,6 +416,7 @@ function hostRoom() {
   state.role = "host";
   state.hostColor = state.preferredColor;
   state.playerColor = state.hostColor;
+  state.peerConnected = false;
   resetScores();
   resetGame(true);
   els.roomInput.value = state.roomId;
@@ -439,6 +442,8 @@ function joinRoom(
   state.role = "guest";
   state.hostColor = hostColor;
   state.playerColor = other(hostColor);
+  state.peerConnected = false;
+  setPreferredColor(state.playerColor);
   setRuleMode(ruleMode);
   resetScores();
   resetGame(true);
@@ -467,8 +472,8 @@ function openRealtimeRoom(roomId, role) {
     .subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
         await state.channel.track({ role, color: colorParam(state.playerColor), rule: state.ruleMode, joinedAt: Date.now() });
-        setNetworkStatus(role === "host" ? `房间 ${roomId} 等待好友` : `已加入房间 ${roomId}`);
-        if (role === "guest") send({ type: "hello" });
+        setNetworkStatus(role === "host" ? `房间 ${roomId} 等待好友` : `已加入房间 ${roomId}，正在确认房主`);
+        if (role === "guest") startGuestHandshake();
         render();
       }
 
@@ -484,9 +489,13 @@ function updatePresenceStatus() {
   const players = Object.values(state.channel.presenceState()).flat();
   const hasOpponent = players.some((player) => player.role && player.role !== state.role);
   if (hasOpponent) {
-    setNetworkStatus(`已连接：你执${colorName(state.playerColor).replace("棋", "")}`);
-    els.shareHint.textContent = "联机对局中，落子会自动同步。";
-    if (state.role === "host") send({ type: "sync", payload: serializeGame() });
+    if (state.role === "host") {
+      confirmPeerConnected();
+      send({ type: "welcome", payload: serializeGame() });
+    } else if (!state.peerConnected) {
+      setNetworkStatus(`已发现房主，正在同步：你将执${colorName(state.playerColor).replace("棋", "")}`);
+      startGuestHandshake();
+    }
   } else {
     setNetworkStatus(state.role === "host" ? `房间 ${state.roomId} 等待好友` : `已加入房间 ${state.roomId}`);
   }
@@ -497,9 +506,8 @@ function handleRemoteMessage(message) {
   if (!message || typeof message !== "object" || message.from === state.clientId) return;
 
   if (message.type === "hello" && state.role === "host") {
-    setNetworkStatus(`已连接：你执${colorName(state.playerColor).replace("棋", "")}`);
-    els.shareHint.textContent = "联机对局中，落子会自动同步。";
-    send({ type: "sync", payload: serializeGame() });
+    confirmPeerConnected();
+    send({ type: "welcome", payload: serializeGame() });
     render();
     return;
   }
@@ -516,13 +524,48 @@ function handleRemoteMessage(message) {
     undo(true);
   }
 
-  if (message.type === "sync") {
+  if (message.type === "welcome" || message.type === "sync") {
     hydrateGame(message.payload);
     if (state.role === "guest") {
-      setNetworkStatus(`已连接：你执${colorName(state.playerColor).replace("棋", "")}`);
-      els.shareHint.textContent = "联机对局中，落子会自动同步。";
+      confirmPeerConnected();
     }
   }
+}
+
+function startGuestHandshake() {
+  if (state.role !== "guest" || state.peerConnected || !state.channel) return;
+  stopGuestHandshake();
+  sendGuestHello();
+  state.helloTimer = window.setInterval(() => {
+    if (state.role !== "guest" || state.peerConnected || !state.channel) {
+      stopGuestHandshake();
+      return;
+    }
+    sendGuestHello();
+  }, 1200);
+}
+
+function sendGuestHello() {
+  send({
+    type: "hello",
+    roomId: state.roomId,
+    guestColor: colorParam(state.playerColor),
+  });
+}
+
+function stopGuestHandshake() {
+  if (state.helloTimer) {
+    window.clearInterval(state.helloTimer);
+    state.helloTimer = null;
+  }
+}
+
+function confirmPeerConnected() {
+  state.peerConnected = true;
+  stopGuestHandshake();
+  setNetworkStatus(`已连接：你执${colorName(state.playerColor).replace("棋", "")}`);
+  els.shareHint.textContent = "联机对局中，落子会自动同步。";
+  render();
 }
 
 function send(message) {
@@ -555,11 +598,15 @@ function hydrateGame(payload) {
   state.score = payload.score || { [BLACK]: 0, [WHITE]: 0 };
   state.hostColor = payload.hostColor || state.hostColor;
   setRuleMode(payload.ruleMode || state.ruleMode);
-  if (state.role === "guest") state.playerColor = other(state.hostColor);
+  if (state.role === "guest") {
+    state.playerColor = other(state.hostColor);
+    setPreferredColor(state.playerColor);
+  }
   render();
 }
 
 function closeConnection() {
+  stopGuestHandshake();
   if (state.channel && state.supabaseClient) {
     state.supabaseClient.removeChannel(state.channel);
   }
@@ -569,6 +616,7 @@ function closeConnection() {
   state.playerColor = EMPTY;
   state.aiColor = EMPTY;
   state.aiThinking = false;
+  state.peerConnected = false;
 }
 
 async function copyInvite() {
@@ -633,9 +681,9 @@ function getRuleLabel() {
 }
 
 buildBoard();
-wireControls();
 setPreferredColor(BLACK);
 setRuleMode("freestyle");
+wireControls();
 render();
 
 async function queueAiMove() {
