@@ -350,6 +350,39 @@ h2 {
   margin-top: 10px;
 }
 
+.voice-panel {
+  margin-top: 10px;
+  border-top: 1px solid #eadfce;
+  padding-top: 12px;
+}
+
+.voice-status {
+  margin-bottom: 9px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  text-align: center;
+}
+
+.voice-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.voice-actions button {
+  min-width: 0;
+  padding: 0 8px;
+}
+
+.voice-actions button.active {
+  color: #fff;
+  background: var(--accent);
+}
+
+.voice-panel audio {
+  display: none;
+}
+
 .undo-prompt {
   margin-top: 12px;
   border: 1px solid rgba(40, 123, 121, 0.28);

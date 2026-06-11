@@ -26,6 +26,11 @@ const els = {
   copyBtn: document.querySelector("#copyBtn"),
   aiBtn: document.querySelector("#aiBtn"),
   localBtn: document.querySelector("#localBtn"),
+  voiceBtn: document.querySelector("#voiceBtn"),
+  muteBtn: document.querySelector("#muteBtn"),
+  hangupBtn: document.querySelector("#hangupBtn"),
+  voiceStatus: document.querySelector("#voiceStatus"),
+  remoteAudio: document.querySelector("#remoteAudio"),
   blackPickBtn: document.querySelector("#blackPickBtn"),
   whitePickBtn: document.querySelector("#whitePickBtn"),
   freeRuleBtn: document.querySelector("#freeRuleBtn"),
@@ -75,6 +80,16 @@ const state = {
   helloTimer: null,
   undoPending: null,
   undoRequestTimer: null,
+  voicePeer: null,
+  voiceLocalStream: null,
+  voiceRemoteStream: null,
+  voiceReady: false,
+  remoteVoiceReady: false,
+  voiceMuted: false,
+  voiceStatus: "语音未开启",
+  voiceReadyTimer: null,
+  voicePendingCandidates: [],
+  voiceOfferStarted: false,
 };
 
 function createEmptyBoard() {
@@ -607,6 +622,7 @@ function render() {
   });
   renderUndoPrompt();
   renderTimer();
+  renderVoiceControls();
   updateMoves();
 }
 
@@ -797,6 +813,14 @@ function updatePresenceStatus() {
 function handleRemoteMessage(message) {
   if (!message || typeof message !== "object" || message.from === state.clientId) return;
 
+  if (message.type.startsWith("voice-")) {
+    void handleVoiceSignal(message).catch(() => {
+      setVoiceStatus("语音信令异常，可挂断后重试");
+      renderVoiceControls();
+    });
+    return;
+  }
+
   if (message.type === "hello" && state.role === "host") {
     confirmPeerConnected();
     send({ type: "welcome", payload: serializeGame() });
@@ -870,6 +894,261 @@ function confirmPeerConnected() {
   render();
 }
 
+async function enableVoice() {
+  if (!state.peerConnected || !["host", "guest"].includes(state.role) || state.voiceReady) return;
+  if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection !== "function") {
+    setVoiceStatus("当前浏览器不支持语音");
+    return;
+  }
+
+  setVoiceStatus("正在申请麦克风权限");
+  renderVoiceControls();
+
+  try {
+    state.voiceLocalStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video: false,
+    });
+    state.voiceReady = true;
+    state.voiceMuted = false;
+    ensureVoicePeer();
+    state.voiceLocalStream.getTracks().forEach((track) => {
+      const alreadyAdded = state.voicePeer
+        .getSenders()
+        .some((sender) => sender.track?.id === track.id);
+      if (!alreadyAdded) state.voicePeer.addTrack(track, state.voiceLocalStream);
+    });
+    setVoiceStatus(state.remoteVoiceReady ? "正在建立语音连接" : "麦克风已开启，等待对方");
+    startVoiceReadyBroadcast();
+    sendVoiceReady();
+    await maybeStartVoiceOffer();
+  } catch (error) {
+    setVoiceStatus(error?.name === "NotAllowedError" ? "麦克风权限被拒绝" : "无法开启麦克风");
+    cleanupVoice(false, false);
+  }
+  renderVoiceControls();
+}
+
+function ensureVoicePeer() {
+  if (state.voicePeer) return state.voicePeer;
+
+  const peer = new RTCPeerConnection({
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+    ],
+  });
+  state.voicePeer = peer;
+
+  peer.addEventListener("icecandidate", (event) => {
+    if (event.candidate) {
+      send({ type: "voice-ice", candidate: event.candidate.toJSON() });
+    } else if (state.role === "host" && peer.localDescription?.type === "offer") {
+      send({ type: "voice-offer", description: peer.localDescription });
+    }
+  });
+
+  peer.addEventListener("track", (event) => {
+    state.voiceRemoteStream = event.streams[0] || new MediaStream([event.track]);
+    els.remoteAudio.srcObject = state.voiceRemoteStream;
+    void els.remoteAudio.play().catch(() => {
+      setVoiceStatus("语音已连接，点击页面后可播放");
+    });
+  });
+
+  peer.addEventListener("connectionstatechange", () => {
+    if (peer.connectionState === "connected") {
+      stopVoiceReadyBroadcast();
+      setVoiceStatus("语音已连接");
+    } else if (peer.connectionState === "connecting") {
+      setVoiceStatus("正在建立语音连接");
+    } else if (peer.connectionState === "failed") {
+      setVoiceStatus("语音连接失败，可挂断后重试");
+    } else if (peer.connectionState === "disconnected") {
+      setVoiceStatus("语音连接中断，正在等待恢复");
+    } else if (peer.connectionState === "closed") {
+      setVoiceStatus("语音已挂断");
+    }
+    renderVoiceControls();
+  });
+
+  return peer;
+}
+
+async function handleVoiceSignal(message) {
+  if (!["host", "guest"].includes(state.role) || !state.peerConnected) return;
+
+  if (message.type === "voice-ready") {
+    state.remoteVoiceReady = true;
+    if (!state.voiceReady) {
+      setVoiceStatus("对方已开启语音，点击开启加入");
+      renderVoiceControls();
+      return;
+    }
+    setVoiceStatus("正在建立语音连接");
+    await maybeStartVoiceOffer();
+    return;
+  }
+
+  if (message.type === "voice-offer" && state.role === "guest" && state.voiceReady) {
+    const peer = ensureVoicePeer();
+    const description = message.description;
+    if (peer.remoteDescription?.sdp !== description?.sdp) {
+      await peer.setRemoteDescription(description);
+      await flushVoiceCandidates();
+      const answer = await peer.createAnswer();
+      await peer.setLocalDescription(answer);
+    }
+    if (peer.localDescription) {
+      send({ type: "voice-answer", description: peer.localDescription });
+    }
+    return;
+  }
+
+  if (message.type === "voice-answer" && state.role === "host" && state.voiceReady) {
+    const peer = ensureVoicePeer();
+    if (!peer.remoteDescription && message.description) {
+      await peer.setRemoteDescription(message.description);
+      await flushVoiceCandidates();
+    }
+    return;
+  }
+
+  if (message.type === "voice-ice" && message.candidate) {
+    const peer = state.voicePeer;
+    if (peer?.remoteDescription) {
+      await peer.addIceCandidate(message.candidate).catch(() => {});
+    } else {
+      state.voicePendingCandidates.push(message.candidate);
+    }
+    return;
+  }
+
+  if (message.type === "voice-hangup") {
+    cleanupVoice(false, false);
+    setVoiceStatus("对方已挂断语音");
+    renderVoiceControls();
+  }
+}
+
+async function maybeStartVoiceOffer() {
+  if (
+    state.role !== "host" ||
+    !state.voiceReady ||
+    !state.remoteVoiceReady
+  ) {
+    return;
+  }
+
+  const peer = ensureVoicePeer();
+  if (peer.localDescription?.type === "offer") {
+    send({ type: "voice-offer", description: peer.localDescription });
+    return;
+  }
+  if (state.voiceOfferStarted || peer.signalingState !== "stable") return;
+
+  state.voiceOfferStarted = true;
+  try {
+    const offer = await peer.createOffer();
+    await peer.setLocalDescription(offer);
+    send({ type: "voice-offer", description: peer.localDescription });
+  } catch {
+    state.voiceOfferStarted = false;
+    setVoiceStatus("创建语音连接失败");
+  }
+}
+
+async function flushVoiceCandidates() {
+  if (!state.voicePeer?.remoteDescription) return;
+  const candidates = state.voicePendingCandidates.splice(0);
+  for (const candidate of candidates) {
+    await state.voicePeer.addIceCandidate(candidate).catch(() => {});
+  }
+}
+
+function startVoiceReadyBroadcast() {
+  stopVoiceReadyBroadcast();
+  state.voiceReadyTimer = window.setInterval(() => {
+    if (!state.voiceReady || !state.channel) {
+      stopVoiceReadyBroadcast();
+      return;
+    }
+    sendVoiceReady();
+    if (state.role === "host" && state.voicePeer?.localDescription?.type === "offer") {
+      send({ type: "voice-offer", description: state.voicePeer.localDescription });
+    }
+  }, 1500);
+}
+
+function stopVoiceReadyBroadcast() {
+  if (state.voiceReadyTimer) {
+    window.clearInterval(state.voiceReadyTimer);
+    state.voiceReadyTimer = null;
+  }
+}
+
+function sendVoiceReady() {
+  send({ type: "voice-ready" });
+}
+
+function toggleVoiceMute() {
+  if (!state.voiceLocalStream) return;
+  state.voiceMuted = !state.voiceMuted;
+  state.voiceLocalStream.getAudioTracks().forEach((track) => {
+    track.enabled = !state.voiceMuted;
+  });
+  setVoiceStatus(state.voiceMuted ? "麦克风已静音" : state.voicePeer?.connectionState === "connected" ? "语音已连接" : "麦克风已开启");
+  renderVoiceControls();
+}
+
+function hangupVoice() {
+  if (!state.voiceReady && !state.voicePeer) return;
+  send({ type: "voice-hangup" });
+  cleanupVoice(false, false);
+  setVoiceStatus("语音已挂断");
+  renderVoiceControls();
+}
+
+function cleanupVoice(notifyPeer = false, preserveRemoteReady = false) {
+  if (notifyPeer && state.channel && (state.voiceReady || state.voicePeer)) {
+    send({ type: "voice-hangup" });
+  }
+  stopVoiceReadyBroadcast();
+  state.voiceLocalStream?.getTracks().forEach((track) => track.stop());
+  state.voiceRemoteStream?.getTracks().forEach((track) => track.stop());
+  state.voicePeer?.close();
+  state.voicePeer = null;
+  state.voiceLocalStream = null;
+  state.voiceRemoteStream = null;
+  state.voiceReady = false;
+  if (!preserveRemoteReady) state.remoteVoiceReady = false;
+  state.voiceMuted = false;
+  state.voicePendingCandidates = [];
+  state.voiceOfferStarted = false;
+  els.remoteAudio.srcObject = null;
+}
+
+function setVoiceStatus(text) {
+  state.voiceStatus = text;
+  els.voiceStatus.textContent = text;
+}
+
+function renderVoiceControls() {
+  const online = ["host", "guest"].includes(state.role) && state.peerConnected;
+  els.voiceBtn.disabled = !online || state.voiceReady;
+  els.voiceBtn.classList.toggle("active", state.voiceReady);
+  els.voiceBtn.textContent = state.voiceReady ? "语音已开启" : "开启语音";
+  els.muteBtn.disabled = !state.voiceReady;
+  els.muteBtn.classList.toggle("active", state.voiceMuted);
+  els.muteBtn.textContent = state.voiceMuted ? "取消静音" : "静音";
+  els.hangupBtn.disabled = !state.voiceReady && !state.voicePeer;
+  els.voiceStatus.textContent = state.voiceStatus;
+}
+
 function send(message) {
   if (!state.channel) return;
   state.channel.send({
@@ -919,6 +1198,8 @@ function closeConnection() {
   stopGuestHandshake();
   stopTurnTimer();
   clearUndoRequest();
+  cleanupVoice(true, false);
+  setVoiceStatus("语音未开启");
   if (state.channel && state.supabaseClient) {
     state.supabaseClient.removeChannel(state.channel);
   }
@@ -955,6 +1236,9 @@ function wireControls() {
   els.copyBtn.addEventListener("click", copyInvite);
   els.aiBtn.addEventListener("click", startAiGame);
   els.localBtn.addEventListener("click", startLocalGame);
+  els.voiceBtn.addEventListener("click", enableVoice);
+  els.muteBtn.addEventListener("click", toggleVoiceMute);
+  els.hangupBtn.addEventListener("click", hangupVoice);
   els.blackPickBtn.addEventListener("click", () => setPreferredColor(BLACK));
   els.whitePickBtn.addEventListener("click", () => setPreferredColor(WHITE));
   els.freeRuleBtn.addEventListener("click", () => setRuleMode("freestyle"));
@@ -967,6 +1251,9 @@ function wireControls() {
   els.resetBtn.addEventListener("click", () => resetGame());
   els.roomInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") joinRoom();
+  });
+  window.addEventListener("pagehide", () => {
+    cleanupVoice(false, false);
   });
 
   const roomFromUrl = new URLSearchParams(window.location.search).get("room");
