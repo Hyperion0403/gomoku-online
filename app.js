@@ -49,6 +49,13 @@ const els = {
   blackScore: document.querySelector("#blackScore"),
   whiteScore: document.querySelector("#whiteScore"),
   movesList: document.querySelector("#movesList"),
+  resultOverlay: document.querySelector("#resultOverlay"),
+  resultDialog: document.querySelector(".result-dialog"),
+  resultArt: document.querySelector("#resultArt"),
+  resultTitle: document.querySelector("#resultTitle"),
+  resultMessage: document.querySelector("#resultMessage"),
+  resultCloseBtn: document.querySelector("#resultCloseBtn"),
+  resultReplayBtn: document.querySelector("#resultReplayBtn"),
 };
 
 const state = {
@@ -90,6 +97,7 @@ const state = {
   voiceReadyTimer: null,
   voicePendingCandidates: [],
   voiceOfferStarted: false,
+  resultDismissed: false,
 };
 
 function createEmptyBoard() {
@@ -163,6 +171,7 @@ function handleMove(row, col, remote = false) {
     state.winner = result.winner;
     state.forbiddenReason = result.forbiddenReason || "";
     state.score[result.winner] += 1;
+    state.resultDismissed = false;
   } else {
     state.turn = other(state.turn);
   }
@@ -498,6 +507,7 @@ function resetGame(remote = false) {
   state.timeoutLoser = EMPTY;
   state.forbiddenReason = "";
   state.moves = [];
+  state.resultDismissed = false;
   resetTurnTimer();
   render();
   if (!remote) send({ type: "reset" });
@@ -587,6 +597,7 @@ function resolveTimeout(loserColor, remote = false) {
   state.timeoutLoser = loserColor;
   state.winner = other(loserColor);
   state.score[state.winner] += 1;
+  state.resultDismissed = false;
   render();
   if (!remote) send({ type: "timeout", loserColor });
 }
@@ -634,7 +645,32 @@ function render() {
   renderUndoPrompt();
   renderTimer();
   renderVoiceControls();
+  renderResultOverlay();
   updateMoves();
+}
+
+function renderResultOverlay() {
+  const onlineGame = ["host", "guest"].includes(state.role) && state.peerConnected;
+  const shouldShow = onlineGame && Boolean(state.winner) && !state.resultDismissed;
+  els.resultOverlay.hidden = !shouldShow;
+  if (!shouldShow) return;
+
+  const playerWon = state.winner === state.playerColor;
+  els.resultDialog.classList.toggle("is-loss", !playerWon);
+  els.resultArt.src = playerWon ? "./assets/result-win.png" : "./assets/result-lose.png";
+  els.resultArt.alt = playerWon ? "胜利角色插画" : "惜败角色插画";
+  els.resultTitle.textContent = playerWon ? "赢啦！" : "这局惜败";
+  els.resultMessage.textContent = playerWon ? "漂亮的一局，和好友再来一盘吧。" : "差一点点，再来一盘翻回来。";
+}
+
+function dismissResultOverlay() {
+  state.resultDismissed = true;
+  els.resultOverlay.hidden = true;
+}
+
+function replayOnlineGame() {
+  dismissResultOverlay();
+  resetGame();
 }
 
 function renderUndoPrompt() {
@@ -1186,6 +1222,7 @@ function serializeGame() {
 
 function hydrateGame(payload) {
   if (!payload) return;
+  const previousWinner = state.winner;
   state.gameStarted = true;
   state.board = payload.board || createEmptyBoard();
   state.turn = payload.turn || BLACK;
@@ -1196,6 +1233,7 @@ function hydrateGame(payload) {
   setRuleMode(payload.ruleMode || state.ruleMode);
   setTimerMode(payload.timerMode || state.timerMode);
   state.timeoutLoser = payload.timeoutLoser || EMPTY;
+  if (!state.winner || state.winner !== previousWinner) state.resultDismissed = false;
   state.pendingTimerMs = payload.turnRemainingMs ?? TURN_TIME_MS;
   if (state.role === "guest") {
     state.playerColor = other(state.hostColor);
@@ -1223,6 +1261,8 @@ function closeConnection() {
   state.peerConnected = false;
   state.timeoutLoser = EMPTY;
   state.gameStarted = false;
+  state.resultDismissed = false;
+  els.resultOverlay.hidden = true;
 }
 
 async function copyInvite() {
@@ -1260,8 +1300,16 @@ function wireControls() {
   els.acceptUndoBtn.addEventListener("click", acceptUndoRequest);
   els.rejectUndoBtn.addEventListener("click", rejectUndoRequest);
   els.resetBtn.addEventListener("click", () => resetGame());
+  els.resultCloseBtn.addEventListener("click", dismissResultOverlay);
+  els.resultReplayBtn.addEventListener("click", replayOnlineGame);
+  els.resultOverlay.addEventListener("click", (event) => {
+    if (event.target === els.resultOverlay) dismissResultOverlay();
+  });
   els.roomInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") joinRoom();
+  });
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !els.resultOverlay.hidden) dismissResultOverlay();
   });
   window.addEventListener("pagehide", () => {
     cleanupVoice(false, false);

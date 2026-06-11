@@ -4,10 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>五子棋对战</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=2" />
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
     <script src="./config.js" defer></script>
-    <script src="./app.js?v=17" defer></script>
+    <script src="./app.js?v=18" defer></script>
   </head>
   <body>
     <main class="shell">
@@ -108,5 +108,17 @@
         </section>
       </aside>
     </main>
+
+    <div class="result-overlay" id="resultOverlay" hidden>
+      <section class="result-dialog" role="dialog" aria-modal="true" aria-labelledby="resultTitle">
+        <button class="result-close" id="resultCloseBtn" type="button" aria-label="关闭结算弹窗">×</button>
+        <img class="result-art" id="resultArt" src="./assets/result-win.png" alt="" />
+        <div class="result-copy">
+          <h2 id="resultTitle">赢啦！</h2>
+          <p id="resultMessage">漂亮的一局，再来一盘？</p>
+        </div>
+        <button class="result-replay" id="resultReplayBtn" type="button">再来一局</button>
+      </section>
+    </div>
   </body>
 </html>
