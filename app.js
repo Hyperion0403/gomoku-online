@@ -251,7 +251,7 @@ function lineHasFour(row, col, dr, dc, color) {
       const moveCol = col + dc * offset;
       if (state.board[moveRow]?.[moveCol] !== EMPTY) return false;
       state.board[moveRow][moveCol] = color;
-      const makesFive = hasExactFive(moveRow, moveCol, color);
+      const makesFive = lineIsExactFiveIncludingAnchor(row, col, moveRow, moveCol, dr, dc, color);
       state.board[moveRow][moveCol] = EMPTY;
       return makesFive;
     });
@@ -269,21 +269,32 @@ function lineCanBecomeOpenFour(row, col, dr, dc, color) {
       const moveCol = col + dc * offset;
       if (state.board[moveRow]?.[moveCol] !== EMPTY) return false;
       state.board[moveRow][moveCol] = color;
-      const openFour = lineIsOpenFour(moveRow, moveCol, dr, dc, color);
+      const openFour = lineIsOpenFour(row, col, moveRow, moveCol, dr, dc, color);
       state.board[moveRow][moveCol] = EMPTY;
       return openFour;
     });
 }
 
-function lineIsOpenFour(row, col, dr, dc, color) {
+function lineIsExactFiveIncludingAnchor(anchorRow, anchorCol, row, col, dr, dc, color) {
+  const forward = countDirection(row, col, dr, dc, color);
+  const backward = countDirection(row, col, -dr, -dc, color);
+  return 1 + forward + backward === 5 && lineSegmentContains(anchorRow, anchorCol, row, col, dr, dc, backward, forward);
+}
+
+function lineIsOpenFour(anchorRow, anchorCol, row, col, dr, dc, color) {
   const forward = countDirection(row, col, dr, dc, color);
   const backward = countDirection(row, col, -dr, -dc, color);
   const count = 1 + forward + backward;
-  if (count !== 4) return false;
+  if (count !== 4 || !lineSegmentContains(anchorRow, anchorCol, row, col, dr, dc, backward, forward)) return false;
 
   const forwardEnd = getCell(row + dr * (forward + 1), col + dc * (forward + 1));
   const backwardEnd = getCell(row - dr * (backward + 1), col - dc * (backward + 1));
   return forwardEnd === EMPTY && backwardEnd === EMPTY;
+}
+
+function lineSegmentContains(targetRow, targetCol, row, col, dr, dc, backward, forward) {
+  const offset = dr !== 0 ? (targetRow - row) / dr : (targetCol - col) / dc;
+  return Number.isInteger(offset) && offset >= -backward && offset <= forward;
 }
 
 function getLineOffsets(row, col, dr, dc) {
