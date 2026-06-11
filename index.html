@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="./styles.css" />
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
     <script src="./config.js" defer></script>
-    <script src="./app.js?v=14" defer></script>
+    <script src="./app.js?v=15" defer></script>
   </head>
   <body>
     <main class="shell">
@@ -20,6 +20,7 @@
           <div class="turn-card" id="turnCard">
             <span class="stone black" aria-hidden="true"></span>
             <span id="turnText">黑棋先手</span>
+            <strong class="timer-text" id="timerText" hidden>25</strong>
           </div>
         </div>
 
@@ -45,6 +46,10 @@
           <div class="rule-pick" role="group" aria-label="规则选择">
             <button id="freeRuleBtn" class="rule-choice active" type="button">自由规则</button>
             <button id="renjuRuleBtn" class="rule-choice" type="button">禁手规则</button>
+          </div>
+          <div class="timer-pick" role="group" aria-label="倒计时选择">
+            <button id="noTimerBtn" class="timer-choice active" type="button">不限时</button>
+            <button id="timer25Btn" class="timer-choice" type="button">每手25秒</button>
           </div>
           <div class="room-row">
             <input id="roomInput" type="text" autocomplete="off" spellcheck="false" placeholder="输入房间码" aria-label="房间码" />
@@ -78,6 +83,13 @@
           <div class="actions">
             <button id="undoBtn" class="secondary">悔棋</button>
             <button id="resetBtn" class="danger">重开</button>
+          </div>
+          <div class="undo-prompt" id="undoPrompt" hidden>
+            <p id="undoPromptText">对方请求撤回上一手</p>
+            <div class="actions" id="undoPromptActions">
+              <button id="acceptUndoBtn">同意</button>
+              <button id="rejectUndoBtn" class="secondary">拒绝</button>
+            </div>
           </div>
         </section>
 

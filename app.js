@@ -2,6 +2,7 @@ const BOARD_SIZE = 15;
 const EMPTY = 0;
 const BLACK = 1;
 const WHITE = 2;
+const TURN_TIME_MS = 25_000;
 const STARS = [
   [3, 3],
   [3, 7],
@@ -29,9 +30,17 @@ const els = {
   whitePickBtn: document.querySelector("#whitePickBtn"),
   freeRuleBtn: document.querySelector("#freeRuleBtn"),
   renjuRuleBtn: document.querySelector("#renjuRuleBtn"),
+  noTimerBtn: document.querySelector("#noTimerBtn"),
+  timer25Btn: document.querySelector("#timer25Btn"),
   shareHint: document.querySelector("#shareHint"),
   undoBtn: document.querySelector("#undoBtn"),
+  undoPrompt: document.querySelector("#undoPrompt"),
+  undoPromptText: document.querySelector("#undoPromptText"),
+  undoPromptActions: document.querySelector("#undoPromptActions"),
+  acceptUndoBtn: document.querySelector("#acceptUndoBtn"),
+  rejectUndoBtn: document.querySelector("#rejectUndoBtn"),
   resetBtn: document.querySelector("#resetBtn"),
+  timerText: document.querySelector("#timerText"),
   blackScore: document.querySelector("#blackScore"),
   whiteScore: document.querySelector("#whiteScore"),
   movesList: document.querySelector("#movesList"),
@@ -44,6 +53,13 @@ const state = {
   moves: [],
   score: { [BLACK]: 0, [WHITE]: 0 },
   ruleMode: "freestyle",
+  timerMode: "none",
+  turnDeadline: 0,
+  timerInterval: null,
+  pausedTimerMs: null,
+  pendingTimerMs: null,
+  timeoutLoser: EMPTY,
+  gameStarted: false,
   forbiddenReason: "",
   role: "local",
   preferredColor: BLACK,
@@ -57,6 +73,8 @@ const state = {
   roomId: "",
   peerConnected: false,
   helloTimer: null,
+  undoPending: null,
+  undoRequestTimer: null,
 };
 
 function createEmptyBoard() {
@@ -77,6 +95,10 @@ function parseColorParam(value, fallback = BLACK) {
 
 function parseRuleParam(value, fallback = "freestyle") {
   return value === "renju" ? "renju" : value === "freestyle" ? "freestyle" : fallback;
+}
+
+function parseTimerParam(value, fallback = "none") {
+  return value === "25" ? "25" : value === "none" ? "none" : fallback;
 }
 
 function other(color) {
@@ -111,6 +133,11 @@ function buildBoard() {
 function handleMove(row, col, remote = false) {
   if (state.winner || state.board[row][col] !== EMPTY) return false;
   if (!remote && !isMyTurn()) return false;
+  if (state.undoPending) {
+    if (!remote) return false;
+    clearUndoRequest();
+  }
+  state.gameStarted = true;
 
   const color = state.turn;
   state.board[row][col] = color;
@@ -125,6 +152,7 @@ function handleMove(row, col, remote = false) {
     state.turn = other(state.turn);
   }
 
+  resetTurnTimer();
   render();
   if (!remote) send({ type: "move", row, col });
   if (!remote) queueAiMove();
@@ -132,6 +160,7 @@ function handleMove(row, col, remote = false) {
 }
 
 function isMyTurn() {
+  if (state.undoPending) return false;
   if (state.role === "local") return true;
   if (state.role === "ai") return state.playerColor === state.turn && !state.aiThinking;
   if (!state.channel || !state.peerConnected) return false;
@@ -297,26 +326,243 @@ function countDirection(row, col, dr, dc, color) {
   return count;
 }
 
-function undo(remote = false) {
+function applyUndo() {
   if (!state.moves.length) return;
+  if (state.winner) {
+    state.score[state.winner] = Math.max(0, state.score[state.winner] - 1);
+  }
   const last = state.moves.pop();
   state.board[last.row][last.col] = EMPTY;
   state.winner = EMPTY;
+  state.timeoutLoser = EMPTY;
   state.forbiddenReason = "";
   state.turn = last.color;
+  state.undoPending = null;
+  state.pausedTimerMs = null;
+  resetTurnTimer();
   render();
-  if (!remote) send({ type: "undo" });
+}
+
+function handleUndoClick() {
+  if (state.role === "local") {
+    applyUndo();
+    return;
+  }
+
+  if (!canRequestOnlineUndo()) return;
+
+  const requestId = crypto.randomUUID();
+  state.undoPending = {
+    direction: "outgoing",
+    requestId,
+    moveCount: state.moves.length,
+    requesterColor: state.playerColor,
+  };
+  pauseTurnTimer();
+  sendUndoRequest();
+  state.undoRequestTimer = window.setInterval(sendUndoRequest, 1200);
+  render();
+}
+
+function sendUndoRequest() {
+  if (state.undoPending?.direction !== "outgoing") return;
+  send({
+    type: "undo-request",
+    requestId: state.undoPending.requestId,
+    moveCount: state.undoPending.moveCount,
+    requesterColor: state.undoPending.requesterColor,
+  });
+}
+
+function canRequestOnlineUndo() {
+  if (!["host", "guest"].includes(state.role) || !state.peerConnected || state.winner || state.undoPending) return false;
+  const last = state.moves.at(-1);
+  return Boolean(last && last.color === state.playerColor && state.turn !== state.playerColor);
+}
+
+function handleUndoRequest(message) {
+  if (state.undoPending?.direction === "incoming" && state.undoPending.requestId === message.requestId) return;
+  const last = state.moves.at(-1);
+  const valid =
+    !state.winner &&
+    !state.undoPending &&
+    message.moveCount === state.moves.length &&
+    last?.color === message.requesterColor &&
+    state.turn === state.playerColor;
+
+  if (!valid) {
+    send({
+      type: "undo-response",
+      requestId: message.requestId,
+      accepted: false,
+      reason: "对方已经落子或棋局状态已变化",
+      remainingMs: getRemainingTimerMs(),
+    });
+    return;
+  }
+
+  state.undoPending = {
+    direction: "incoming",
+    requestId: message.requestId,
+    moveCount: message.moveCount,
+    requesterColor: message.requesterColor,
+  };
+  pauseTurnTimer();
+  render();
+}
+
+function acceptUndoRequest() {
+  if (state.undoPending?.direction !== "incoming") return;
+  const requestId = state.undoPending.requestId;
+  applyUndo();
+  send({
+    type: "undo-response",
+    requestId,
+    accepted: true,
+    payload: serializeGame(),
+  });
+}
+
+function rejectUndoRequest() {
+  if (state.undoPending?.direction !== "incoming") return;
+  const requestId = state.undoPending.requestId;
+  const remainingMs = state.pausedTimerMs ?? TURN_TIME_MS;
+  clearUndoRequest();
+  resumeTurnTimer(remainingMs);
+  send({
+    type: "undo-response",
+    requestId,
+    accepted: false,
+    reason: "对方拒绝了悔棋",
+    remainingMs,
+  });
+  render();
+}
+
+function handleUndoResponse(message) {
+  if (state.undoPending?.direction !== "outgoing" || state.undoPending.requestId !== message.requestId) return;
+
+  if (message.accepted && message.payload) {
+    clearUndoRequest();
+    hydrateGame(message.payload);
+    setNetworkStatus(`已连接：你执${colorName(state.playerColor).replace("棋", "")}，悔棋已同意`);
+    return;
+  }
+
+  clearUndoRequest();
+  resumeTurnTimer(message.remainingMs);
+  setNetworkStatus(message.reason || "对方拒绝了悔棋");
+  render();
+}
+
+function clearUndoRequest() {
+  if (state.undoRequestTimer) {
+    window.clearInterval(state.undoRequestTimer);
+    state.undoRequestTimer = null;
+  }
+  state.undoPending = null;
+  state.pausedTimerMs = null;
 }
 
 function resetGame(remote = false) {
+  clearUndoRequest();
   state.board = createEmptyBoard();
   state.turn = BLACK;
   state.winner = EMPTY;
+  state.timeoutLoser = EMPTY;
   state.forbiddenReason = "";
   state.moves = [];
+  resetTurnTimer();
   render();
   if (!remote) send({ type: "reset" });
   if (!remote && state.role === "ai") queueAiMove();
+}
+
+function resetTurnTimer(remainingMs = TURN_TIME_MS) {
+  stopTurnTimer();
+  state.pendingTimerMs = remainingMs;
+  if (!shouldRunTimer()) {
+    renderTimer();
+    return;
+  }
+
+  state.pendingTimerMs = null;
+  state.pausedTimerMs = null;
+  state.turnDeadline = Date.now() + Math.max(0, remainingMs);
+  state.timerInterval = window.setInterval(updateTurnTimer, 200);
+  updateTurnTimer();
+}
+
+function shouldRunTimer() {
+  if (!state.gameStarted || state.timerMode !== "25" || state.winner || state.undoPending) return false;
+  if (state.role === "local" || state.role === "ai") return true;
+  return state.peerConnected;
+}
+
+function stopTurnTimer() {
+  if (state.timerInterval) {
+    window.clearInterval(state.timerInterval);
+    state.timerInterval = null;
+  }
+  state.turnDeadline = 0;
+}
+
+function pauseTurnTimer() {
+  if (state.timerMode !== "25") return;
+  state.pausedTimerMs = getRemainingTimerMs();
+  stopTurnTimer();
+  renderTimer();
+}
+
+function resumeTurnTimer(remainingMs = state.pausedTimerMs ?? TURN_TIME_MS) {
+  state.pausedTimerMs = null;
+  resetTurnTimer(remainingMs);
+}
+
+function getRemainingTimerMs() {
+  if (state.timerMode !== "25") return null;
+  if (state.pausedTimerMs !== null) return state.pausedTimerMs;
+  if (state.turnDeadline) return Math.max(0, state.turnDeadline - Date.now());
+  return state.pendingTimerMs ?? TURN_TIME_MS;
+}
+
+function updateTurnTimer() {
+  if (!shouldRunTimer()) {
+    stopTurnTimer();
+    renderTimer();
+    return;
+  }
+
+  const remainingMs = getRemainingTimerMs();
+  if (remainingMs <= 0) {
+    resolveTimeout(state.turn);
+    return;
+  }
+  renderTimer();
+}
+
+function renderTimer() {
+  const enabled = state.timerMode === "25";
+  els.timerText.hidden = !enabled;
+  if (!enabled) return;
+  if (state.winner) {
+    els.timerText.textContent = state.timeoutLoser ? "0" : "—";
+    return;
+  }
+
+  const remainingMs = getRemainingTimerMs();
+  els.timerText.textContent = String(Math.max(0, Math.ceil((remainingMs ?? TURN_TIME_MS) / 1000)));
+}
+
+function resolveTimeout(loserColor, remote = false) {
+  if (state.winner || loserColor !== state.turn) return;
+  stopTurnTimer();
+  clearUndoRequest();
+  state.timeoutLoser = loserColor;
+  state.winner = other(loserColor);
+  state.score[state.winner] += 1;
+  render();
+  if (!remote) send({ type: "timeout", loserColor });
 }
 
 function render() {
@@ -336,15 +582,48 @@ function render() {
 
   els.turnCard.querySelector(".stone").className = `stone ${state.turn === BLACK ? "black" : "white"}`;
   els.turnText.textContent = state.winner
-    ? `${colorName(state.winner)}获胜${state.forbiddenReason ? `（黑棋${state.forbiddenReason}禁手）` : ""}`
+    ? `${colorName(state.winner)}获胜${
+        state.timeoutLoser
+          ? `（${colorName(state.timeoutLoser)}超时）`
+          : state.forbiddenReason
+            ? `（黑棋${state.forbiddenReason}禁手）`
+            : ""
+      }`
     : `${colorName(state.turn)}落子${getTurnSuffix()}`;
   els.blackScore.textContent = String(state.score[BLACK]);
   els.whiteScore.textContent = String(state.score[WHITE]);
-  els.undoBtn.disabled = !state.moves.length || state.role !== "local";
+  els.undoBtn.disabled = state.role === "local" ? !state.moves.length : !canRequestOnlineUndo();
+  els.undoBtn.textContent = state.undoPending?.direction === "outgoing" ? "等待回应" : "悔棋";
+  const settingsLocked = state.role !== "local" || state.moves.length > 0;
+  [
+    els.blackPickBtn,
+    els.whitePickBtn,
+    els.freeRuleBtn,
+    els.renjuRuleBtn,
+    els.noTimerBtn,
+    els.timer25Btn,
+  ].forEach((button) => {
+    button.disabled = settingsLocked;
+  });
+  renderUndoPrompt();
+  renderTimer();
   updateMoves();
 }
 
+function renderUndoPrompt() {
+  if (!state.undoPending) {
+    els.undoPrompt.hidden = true;
+    return;
+  }
+
+  els.undoPrompt.hidden = false;
+  const incoming = state.undoPending.direction === "incoming";
+  els.undoPromptText.textContent = incoming ? "对方请求撤回刚刚落下的一手" : "悔棋申请已发送，等待对方处理";
+  els.undoPromptActions.hidden = !incoming;
+}
+
 function getTurnSuffix() {
+  if (state.undoPending) return "，悔棋确认中";
   if (state.role === "local") return "";
   if (state.role === "ai") {
     if (state.aiThinking) return "，AI思考中";
@@ -373,6 +652,7 @@ function getInviteUrl(roomId) {
   url.searchParams.set("room", roomId);
   url.searchParams.set("hostColor", colorParam(state.hostColor));
   url.searchParams.set("rule", state.ruleMode);
+  url.searchParams.set("timer", state.timerMode);
   return url.toString();
 }
 
@@ -387,11 +667,12 @@ function resetScores() {
 function startAiGame() {
   closeConnection();
   state.role = "ai";
+  state.gameStarted = true;
   state.playerColor = state.preferredColor;
   state.aiColor = other(state.playerColor);
   resetScores();
   resetGame(true);
-  setNetworkStatus(`AI对战：你执${colorName(state.playerColor).replace("棋", "")}，${getRuleLabel()}`);
+  setNetworkStatus(`AI对战：你执${colorName(state.playerColor).replace("棋", "")}，${getRuleLabel()}，${getTimerLabel()}`);
   els.shareHint.textContent = "AI会优先使用 DeepSeek；接口不可用时会用本地算法临时落子。";
   render();
   queueAiMove();
@@ -399,9 +680,10 @@ function startAiGame() {
 
 function startLocalGame() {
   closeConnection();
+  state.gameStarted = true;
   resetScores();
   resetGame(true);
-  setNetworkStatus(`本地模式：${getRuleLabel()}`);
+  setNetworkStatus(`本地模式：${getRuleLabel()}，${getTimerLabel()}`);
   els.shareHint.textContent = "本地双人轮流落子；禁手规则下黑棋三三、四四、长连判负。";
 }
 
@@ -414,6 +696,7 @@ function hostRoom() {
   closeConnection();
   state.roomId = makeRoomId();
   state.role = "host";
+  state.gameStarted = true;
   state.hostColor = state.preferredColor;
   state.playerColor = state.hostColor;
   state.peerConnected = false;
@@ -422,7 +705,7 @@ function hostRoom() {
   els.roomInput.value = state.roomId;
   window.history.replaceState(null, "", getInviteUrl(state.roomId));
   setNetworkStatus(`房间 ${state.roomId} 等待好友`);
-  els.shareHint.textContent = `你执${colorName(state.playerColor).replace("棋", "")}，${getRuleLabel()}。好友打开邀请链接后会执另一方。`;
+  els.shareHint.textContent = `你执${colorName(state.playerColor).replace("棋", "")}，${getRuleLabel()}，${getTimerLabel()}。好友打开邀请链接后会执另一方。`;
   openRealtimeRoom(state.roomId, "host");
 }
 
@@ -430,6 +713,7 @@ function joinRoom(
   roomId = els.roomInput.value.trim(),
   hostColor = parseColorParam(new URLSearchParams(window.location.search).get("hostColor"), other(state.preferredColor)),
   ruleMode = parseRuleParam(new URLSearchParams(window.location.search).get("rule"), state.ruleMode),
+  timerMode = parseTimerParam(new URLSearchParams(window.location.search).get("timer"), state.timerMode),
 ) {
   if (!roomId) return;
   if (!hasSupabaseConfig()) {
@@ -440,11 +724,13 @@ function joinRoom(
   closeConnection();
   state.roomId = roomId;
   state.role = "guest";
+  state.gameStarted = true;
   state.hostColor = hostColor;
   state.playerColor = other(hostColor);
   state.peerConnected = false;
   setPreferredColor(state.playerColor);
   setRuleMode(ruleMode);
+  setTimerMode(timerMode);
   resetScores();
   resetGame(true);
   setNetworkStatus(`正在连接房间 ${roomId}`);
@@ -471,7 +757,13 @@ function openRealtimeRoom(roomId, role) {
     .on("presence", { event: "sync" }, () => updatePresenceStatus())
     .subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
-        await state.channel.track({ role, color: colorParam(state.playerColor), rule: state.ruleMode, joinedAt: Date.now() });
+        await state.channel.track({
+          role,
+          color: colorParam(state.playerColor),
+          rule: state.ruleMode,
+          timer: state.timerMode,
+          joinedAt: Date.now(),
+        });
         setNetworkStatus(role === "host" ? `房间 ${roomId} 等待好友` : `已加入房间 ${roomId}，正在确认房主`);
         if (role === "guest") startGuestHandshake();
         render();
@@ -520,8 +812,16 @@ function handleRemoteMessage(message) {
     resetGame(true);
   }
 
-  if (message.type === "undo") {
-    undo(true);
+  if (message.type === "undo-request") {
+    handleUndoRequest(message);
+  }
+
+  if (message.type === "undo-response") {
+    handleUndoResponse(message);
+  }
+
+  if (message.type === "timeout") {
+    resolveTimeout(message.loserColor, true);
   }
 
   if (message.type === "welcome" || message.type === "sync") {
@@ -561,10 +861,12 @@ function stopGuestHandshake() {
 }
 
 function confirmPeerConnected() {
+  const wasConnected = state.peerConnected;
   state.peerConnected = true;
   stopGuestHandshake();
   setNetworkStatus(`已连接：你执${colorName(state.playerColor).replace("棋", "")}`);
   els.shareHint.textContent = "联机对局中，落子会自动同步。";
+  if (!wasConnected) resetTurnTimer(state.pendingTimerMs ?? TURN_TIME_MS);
   render();
 }
 
@@ -586,11 +888,15 @@ function serializeGame() {
     score: state.score,
     hostColor: state.hostColor,
     ruleMode: state.ruleMode,
+    timerMode: state.timerMode,
+    turnRemainingMs: getRemainingTimerMs(),
+    timeoutLoser: state.timeoutLoser,
   };
 }
 
 function hydrateGame(payload) {
   if (!payload) return;
+  state.gameStarted = true;
   state.board = payload.board || createEmptyBoard();
   state.turn = payload.turn || BLACK;
   state.winner = payload.winner || EMPTY;
@@ -598,15 +904,21 @@ function hydrateGame(payload) {
   state.score = payload.score || { [BLACK]: 0, [WHITE]: 0 };
   state.hostColor = payload.hostColor || state.hostColor;
   setRuleMode(payload.ruleMode || state.ruleMode);
+  setTimerMode(payload.timerMode || state.timerMode);
+  state.timeoutLoser = payload.timeoutLoser || EMPTY;
+  state.pendingTimerMs = payload.turnRemainingMs ?? TURN_TIME_MS;
   if (state.role === "guest") {
     state.playerColor = other(state.hostColor);
     setPreferredColor(state.playerColor);
   }
+  resetTurnTimer(state.pendingTimerMs);
   render();
 }
 
 function closeConnection() {
   stopGuestHandshake();
+  stopTurnTimer();
+  clearUndoRequest();
   if (state.channel && state.supabaseClient) {
     state.supabaseClient.removeChannel(state.channel);
   }
@@ -617,6 +929,8 @@ function closeConnection() {
   state.aiColor = EMPTY;
   state.aiThinking = false;
   state.peerConnected = false;
+  state.timeoutLoser = EMPTY;
+  state.gameStarted = false;
 }
 
 async function copyInvite() {
@@ -645,7 +959,11 @@ function wireControls() {
   els.whitePickBtn.addEventListener("click", () => setPreferredColor(WHITE));
   els.freeRuleBtn.addEventListener("click", () => setRuleMode("freestyle"));
   els.renjuRuleBtn.addEventListener("click", () => setRuleMode("renju"));
-  els.undoBtn.addEventListener("click", () => undo());
+  els.noTimerBtn.addEventListener("click", () => setTimerMode("none"));
+  els.timer25Btn.addEventListener("click", () => setTimerMode("25"));
+  els.undoBtn.addEventListener("click", handleUndoClick);
+  els.acceptUndoBtn.addEventListener("click", acceptUndoRequest);
+  els.rejectUndoBtn.addEventListener("click", rejectUndoRequest);
   els.resetBtn.addEventListener("click", () => resetGame());
   els.roomInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") joinRoom();
@@ -655,11 +973,13 @@ function wireControls() {
   if (roomFromUrl) {
     const hostColor = parseColorParam(new URLSearchParams(window.location.search).get("hostColor"), BLACK);
     const ruleMode = parseRuleParam(new URLSearchParams(window.location.search).get("rule"), "freestyle");
+    const timerMode = parseTimerParam(new URLSearchParams(window.location.search).get("timer"), "none");
     els.roomInput.value = roomFromUrl;
     setPreferredColor(other(hostColor));
     setRuleMode(ruleMode);
+    setTimerMode(timerMode);
     setTimeout(() => {
-      if (state.role === "local") joinRoom(roomFromUrl, hostColor, ruleMode);
+      if (state.role === "local") joinRoom(roomFromUrl, hostColor, ruleMode, timerMode);
     }, 0);
   }
 }
@@ -680,9 +1000,22 @@ function getRuleLabel() {
   return state.ruleMode === "renju" ? "禁手规则" : "自由规则";
 }
 
+function setTimerMode(timerMode) {
+  state.timerMode = parseTimerParam(timerMode);
+  els.noTimerBtn.classList.toggle("active", state.timerMode === "none");
+  els.timer25Btn.classList.toggle("active", state.timerMode === "25");
+  resetTurnTimer();
+  renderTimer();
+}
+
+function getTimerLabel() {
+  return state.timerMode === "25" ? "每手25秒" : "不限时";
+}
+
 buildBoard();
 setPreferredColor(BLACK);
 setRuleMode("freestyle");
+setTimerMode("none");
 wireControls();
 render();
 

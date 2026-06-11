@@ -140,6 +140,14 @@ h2 {
   white-space: nowrap;
 }
 
+.timer-text {
+  min-width: 34px;
+  border-left: 1px solid rgba(139, 90, 43, 0.2);
+  padding-left: 9px;
+  color: var(--danger);
+  text-align: center;
+}
+
 .board-wrap {
   display: grid;
   place-items: center;
@@ -286,19 +294,22 @@ h2 {
 .room-row,
 .actions,
 .color-pick,
-.rule-pick {
+.rule-pick,
+.timer-pick {
   display: grid;
   gap: 10px;
 }
 
 .color-pick,
-.rule-pick {
+.rule-pick,
+.timer-pick {
   grid-template-columns: 1fr 1fr;
   margin-bottom: 10px;
 }
 
 .color-choice,
-.rule-choice {
+.rule-choice,
+.timer-choice {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -309,12 +320,14 @@ h2 {
 }
 
 .color-choice:hover,
-.rule-choice:hover {
+.rule-choice:hover,
+.timer-choice:hover {
   background: #f3eadc;
 }
 
 .color-choice.active,
-.rule-choice.active {
+.rule-choice.active,
+.timer-choice.active {
   color: #fff;
   background: var(--accent);
   border-color: var(--accent);
@@ -335,6 +348,20 @@ h2 {
 
 .solo-actions {
   margin-top: 10px;
+}
+
+.undo-prompt {
+  margin-top: 12px;
+  border: 1px solid rgba(40, 123, 121, 0.28);
+  border-radius: 6px;
+  padding: 12px;
+  background: rgba(40, 123, 121, 0.08);
+}
+
+.undo-prompt p {
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+  font-weight: 700;
 }
 
 input {
@@ -445,7 +472,8 @@ input:focus {
   .actions,
   .room-row,
   .color-pick,
-  .rule-pick {
+  .rule-pick,
+  .timer-pick {
     grid-template-columns: 1fr;
   }
 }
