@@ -104,14 +104,14 @@ button.danger:hover {
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  min-height: 82px;
-  margin-bottom: 14px;
+  min-height: 52px;
+  margin-bottom: 12px;
 }
 
 .eyebrow {
-  margin: 0 0 5px;
+  margin: 0;
   color: var(--mint-strong);
-  font-size: 0.78rem;
+  font-size: 1rem;
   font-weight: 800;
   letter-spacing: 0;
   text-transform: uppercase;
@@ -160,6 +160,8 @@ h2 {
 }
 
 .board-wrap {
+  display: grid;
+  place-items: start center;
   width: 100%;
 }
 
@@ -169,7 +171,7 @@ h2 {
   display: grid;
   grid-template-columns: repeat(15, minmax(0, 1fr));
   grid-template-rows: repeat(15, minmax(0, 1fr));
-  width: 100%;
+  width: min(100%, calc(100vh - 112px));
   aspect-ratio: 1;
   overflow: hidden;
   border: 2px solid rgba(99, 67, 50, 0.72);
@@ -182,6 +184,10 @@ h2 {
     var(--cell) var(--cell),
     var(--cell) var(--cell),
     100% 100%;
+  background-position:
+    calc(var(--cell) / -2) calc(var(--cell) / -2),
+    calc(var(--cell) / -2) calc(var(--cell) / -2),
+    0 0;
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.28),
     0 20px 46px rgba(109, 72, 51, 0.2);
@@ -577,6 +583,10 @@ input:focus {
     max-height: none;
     overflow: visible;
   }
+
+  .board {
+    width: 100%;
+  }
 }
 
 @media (max-width: 560px) {
@@ -587,17 +597,14 @@ input:focus {
 
   .topbar {
     align-items: flex-start;
-    min-height: 0;
+    align-items: center;
+    min-height: 58px;
     margin: 0;
     padding: 16px 14px 14px;
   }
 
-  h1 {
-    font-size: 2rem;
-  }
-
   .eyebrow {
-    font-size: 0.68rem;
+    font-size: 0.78rem;
   }
 
   .turn-card {

@@ -631,7 +631,11 @@ function render() {
   els.whiteScore.textContent = String(state.score[WHITE]);
   els.undoBtn.disabled = state.role === "local" ? !state.moves.length : !canRequestOnlineUndo();
   els.undoBtn.textContent = state.undoPending?.direction === "outgoing" ? "等待回应" : "悔棋";
-  const settingsLocked = state.role !== "local" || state.moves.length > 0;
+  const settingsLocked =
+    state.moves.length > 0 ||
+    state.role === "ai" ||
+    state.role === "guest" ||
+    (state.role === "host" && state.peerConnected);
   [
     els.blackPickBtn,
     els.whitePickBtn,
@@ -1334,12 +1338,14 @@ function setPreferredColor(color) {
   state.preferredColor = color;
   els.blackPickBtn.classList.toggle("active", color === BLACK);
   els.whitePickBtn.classList.toggle("active", color === WHITE);
+  syncWaitingHostSettings();
 }
 
 function setRuleMode(ruleMode) {
   state.ruleMode = parseRuleParam(ruleMode);
   els.freeRuleBtn.classList.toggle("active", state.ruleMode === "freestyle");
   els.renjuRuleBtn.classList.toggle("active", state.ruleMode === "renju");
+  syncWaitingHostSettings();
 }
 
 function getRuleLabel() {
@@ -1352,6 +1358,27 @@ function setTimerMode(timerMode) {
   els.timer25Btn.classList.toggle("active", state.timerMode === "25");
   resetTurnTimer();
   renderTimer();
+  syncWaitingHostSettings();
+}
+
+function syncWaitingHostSettings() {
+  if (state.role !== "host" || state.peerConnected || !state.roomId) return;
+
+  state.hostColor = state.preferredColor;
+  state.playerColor = state.hostColor;
+  window.history.replaceState(null, "", getInviteUrl(state.roomId));
+  setNetworkStatus(`房间 ${state.roomId} 等待好友`);
+  els.shareHint.textContent = `你执${colorName(state.playerColor).replace("棋", "")}，${getRuleLabel()}，${getTimerLabel()}。好友打开邀请链接后会执另一方。`;
+
+  if (state.channel) {
+    void state.channel.track({
+      role: "host",
+      color: colorParam(state.playerColor),
+      rule: state.ruleMode,
+      timer: state.timerMode,
+      joinedAt: Date.now(),
+    });
+  }
 }
 
 function getTimerLabel() {
