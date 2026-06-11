@@ -5,8 +5,8 @@
   --paper: #fff7fa;
   --panel: #fffdfd;
   --line: #f0ccd7;
-  --wood: #9d624f;
-  --wood-line: #f0d9b3;
+  --wood: #a96f5b;
+  --wood-line: #ead2b0;
   --mint: #8bcbbf;
   --mint-strong: #4aa795;
   --pink: #f58caa;
@@ -176,8 +176,8 @@ h2 {
   overflow: hidden;
   border-radius: 8px;
   background:
-    linear-gradient(to right, transparent calc(50% - 0.65px), rgba(240, 217, 179, 0.72) calc(50% - 0.65px), rgba(240, 217, 179, 0.72) calc(50% + 0.65px), transparent calc(50% + 0.65px)),
-    linear-gradient(to bottom, transparent calc(50% - 0.65px), rgba(240, 217, 179, 0.72) calc(50% - 0.65px), rgba(240, 217, 179, 0.72) calc(50% + 0.65px), transparent calc(50% + 0.65px)),
+    linear-gradient(to right, transparent calc(50% - 0.5px), rgba(234, 210, 176, 0.4) calc(50% - 0.5px), rgba(234, 210, 176, 0.4) calc(50% + 0.5px), transparent calc(50% + 0.5px)),
+    linear-gradient(to bottom, transparent calc(50% - 0.5px), rgba(234, 210, 176, 0.4) calc(50% - 0.5px), rgba(234, 210, 176, 0.4) calc(50% + 0.5px), transparent calc(50% + 0.5px)),
     repeating-linear-gradient(90deg, rgba(255, 244, 222, 0.025) 0 1px, transparent 1px 5px),
     repeating-linear-gradient(0deg, rgba(69, 34, 30, 0.025) 0 1px, transparent 1px 4px),
     var(--wood);
@@ -213,6 +213,10 @@ h2 {
   background: transparent;
   transform: none;
   box-shadow: none;
+}
+
+.point:disabled {
+  opacity: 1;
 }
 
 .point::before {
@@ -252,14 +256,14 @@ h2 {
 
 .point.black::before {
   background:
-    radial-gradient(circle at 31% 24%, rgba(255, 220, 183, 0.38), transparent 16%),
-    radial-gradient(circle at 58% 66%, #322932, #201f27 72%);
+    radial-gradient(circle at 31% 24%, rgba(255, 229, 201, 0.55), transparent 17%),
+    radial-gradient(circle at 58% 66%, #49404a, #282630 72%);
 }
 
 .point.white::before {
   background:
-    radial-gradient(circle at 31% 24%, #fffaf1, transparent 20%),
-    radial-gradient(circle at 58% 66%, #f2dece, #e7cbbc 74%);
+    radial-gradient(circle at 31% 24%, #ffffff, transparent 21%),
+    radial-gradient(circle at 58% 66%, #fff5e9, #ead3c4 76%);
 }
 
 .point.last::after {
