@@ -614,7 +614,7 @@ function render() {
     cell.disabled = Boolean(value) || Boolean(state.winner) || !canPlaceManually();
     cell.classList.add(value === BLACK ? "black" : value === WHITE ? "white" : "empty");
     cell.classList.toggle("last", Boolean(last && last.row === row && last.col === col));
-    cell.style.color = state.turn === BLACK ? "#15171b" : "#f2eee6";
+    cell.style.color = state.turn === BLACK ? "#4aa795" : "#fffafb";
   });
 
   els.turnCard.querySelector(".stone").className = `stone ${state.turn === BLACK ? "black" : "white"}`;
