@@ -4,25 +4,28 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>GOMOKU ONLINE</title>
-    <link rel="stylesheet" href="./styles.css?v=8" />
+    <link rel="stylesheet" href="./styles.css?v=9" />
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
     <script src="./config.js" defer></script>
-    <script src="./app.js?v=21" defer></script>
+    <script src="./app.js?v=22" defer></script>
   </head>
   <body>
     <main class="shell">
       <section class="game-area" aria-label="五子棋棋盘">
         <div class="topbar">
           <p class="eyebrow">GOMOKU ONLINE</p>
-          <div class="turn-card" id="turnCard">
-            <span class="stone black" aria-hidden="true"></span>
-            <span id="turnText">黑棋先手</span>
-            <strong class="timer-text" id="timerText" hidden>25</strong>
+          <div class="topbar-actions">
+            <button id="undoBtn" class="top-undo secondary" type="button">悔棋</button>
+            <div class="turn-card" id="turnCard">
+              <span class="stone black" aria-hidden="true"></span>
+              <span id="turnText">黑棋先手</span>
+              <strong class="timer-text" id="timerText" hidden>25</strong>
+            </div>
           </div>
         </div>
 
         <div class="board-wrap">
-          <div class="board" id="board" role="grid" aria-label="15乘15五子棋棋盘"></div>
+          <div class="board" id="board" role="grid" aria-label="18乘18五子棋棋盘"></div>
         </div>
       </section>
 
@@ -86,8 +89,7 @@
               <small>白棋</small>
             </div>
           </div>
-          <div class="actions">
-            <button id="undoBtn" class="secondary">悔棋</button>
+          <div class="actions game-actions">
             <button id="resetBtn" class="danger">重开</button>
           </div>
           <div class="undo-prompt" id="undoPrompt" hidden>

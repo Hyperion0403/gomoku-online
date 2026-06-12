@@ -1,4 +1,4 @@
-const BOARD_SIZE = 15;
+const BOARD_SIZE = 18;
 const EMPTY = 0;
 const BLACK = 1;
 const WHITE = 2;
@@ -28,9 +28,9 @@ exports.handler = async (event) => {
   }
 
   const prompt = [
-    "You are playing Gomoku on a 15x15 board.",
+    "You are playing Gomoku on an 18x18 board.",
     "Return exactly one legal move for the AI.",
-    "Coordinates are zero-based: row 0-14, col 0-14.",
+    "Coordinates are zero-based: row 0-17, col 0-17.",
     "Board values: 0 empty, 1 black, 2 white.",
     ruleMode === "renju"
       ? "Renju forbidden rule is enabled: black must not play overline, double-four, or double-open-three. White has no forbidden moves."

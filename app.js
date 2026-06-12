@@ -1,18 +1,18 @@
-const BOARD_SIZE = 15;
+const BOARD_SIZE = 18;
 const EMPTY = 0;
 const BLACK = 1;
 const WHITE = 2;
 const TURN_TIME_MS = 25_000;
 const STARS = [
   [3, 3],
-  [3, 7],
-  [3, 11],
-  [7, 3],
-  [7, 7],
-  [7, 11],
-  [11, 3],
-  [11, 7],
-  [11, 11],
+  [3, 8],
+  [3, 14],
+  [8, 3],
+  [8, 8],
+  [8, 14],
+  [14, 3],
+  [14, 8],
+  [14, 14],
 ];
 
 const els = {
@@ -1227,12 +1227,16 @@ function serializeGame() {
 function hydrateGame(payload) {
   if (!payload) return;
   const previousWinner = state.winner;
+  const hasValidBoard =
+    Array.isArray(payload.board) &&
+    payload.board.length === BOARD_SIZE &&
+    payload.board.every((row) => Array.isArray(row) && row.length === BOARD_SIZE);
   state.gameStarted = true;
-  state.board = payload.board || createEmptyBoard();
-  state.turn = payload.turn || BLACK;
-  state.winner = payload.winner || EMPTY;
-  state.moves = payload.moves || [];
-  state.score = payload.score || { [BLACK]: 0, [WHITE]: 0 };
+  state.board = hasValidBoard ? payload.board : createEmptyBoard();
+  state.turn = hasValidBoard ? payload.turn || BLACK : BLACK;
+  state.winner = hasValidBoard ? payload.winner || EMPTY : EMPTY;
+  state.moves = hasValidBoard ? payload.moves || [] : [];
+  state.score = hasValidBoard ? payload.score || { [BLACK]: 0, [WHITE]: 0 } : { [BLACK]: 0, [WHITE]: 0 };
   state.hostColor = payload.hostColor || state.hostColor;
   setRuleMode(payload.ruleMode || state.ruleMode);
   setTimerMode(payload.timerMode || state.timerMode);
