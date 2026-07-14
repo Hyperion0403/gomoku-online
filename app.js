@@ -108,6 +108,29 @@ function colorName(color) {
   return color === BLACK ? "黑棋" : "白棋";
 }
 
+function isOnlineRole() {
+  return state.role === "host" || state.role === "guest";
+}
+
+function applyOnlineHostColor(hostColor) {
+  if (!isOnlineRole()) return;
+  state.hostColor = hostColor;
+  state.playerColor = state.role === "host" ? hostColor : other(hostColor);
+  state.preferredColor = state.playerColor;
+  els.blackPickBtn.classList.toggle("active", state.preferredColor === BLACK);
+  els.whitePickBtn.classList.toggle("active", state.preferredColor === WHITE);
+}
+
+function getNextOnlineHostColor() {
+  if (!isOnlineRole() || state.ruleMode !== "renju" || !state.winner) return state.hostColor;
+  return state.winner === state.hostColor ? BLACK : WHITE;
+}
+
+function parseHostColor(value, fallback = BLACK) {
+  if (value === BLACK || value === WHITE) return value;
+  return parseColorParam(value, fallback);
+}
+
 function colorParam(color) {
   return color === WHITE ? "white" : "black";
 }
@@ -499,7 +522,17 @@ function clearUndoRequest() {
   state.pausedTimerMs = null;
 }
 
-function resetGame(remote = false) {
+function resetGame(remote = false, payload = null) {
+  const resetPayload = payload || {};
+  if (isOnlineRole()) {
+    const nextHostColor = resetPayload.hostColor
+      ? parseHostColor(resetPayload.hostColor, state.hostColor)
+      : remote
+        ? state.hostColor
+        : getNextOnlineHostColor();
+    applyOnlineHostColor(nextHostColor);
+    if (resetPayload.score) state.score = resetPayload.score;
+  }
   clearUndoRequest();
   state.board = createEmptyBoard();
   state.turn = BLACK;
@@ -510,7 +543,15 @@ function resetGame(remote = false) {
   state.resultDismissed = false;
   resetTurnTimer();
   render();
-  if (!remote) send({ type: "reset" });
+  if (isOnlineRole() && state.peerConnected) {
+    if (state.role === "host" && state.roomId) {
+      window.history.replaceState(null, "", getInviteUrl(state.roomId));
+    }
+    setNetworkStatus(`已连接：你执${colorName(state.playerColor).replace("棋", "")}`);
+    els.shareHint.textContent =
+      state.ruleMode === "renju" ? "禁手规则：上一局赢家会在下一局执黑。" : "联机对局中，落子会自动同步。";
+  }
+  if (!remote) send({ type: "reset", payload: serializeGame() });
   if (!remote && state.role === "ai") queueAiMove();
 }
 
@@ -884,7 +925,7 @@ function handleRemoteMessage(message) {
   }
 
   if (message.type === "reset") {
-    resetGame(true);
+    resetGame(true, message.payload);
   }
 
   if (message.type === "undo-request") {
@@ -1237,7 +1278,7 @@ function hydrateGame(payload) {
   state.winner = hasValidBoard ? payload.winner || EMPTY : EMPTY;
   state.moves = hasValidBoard ? payload.moves || [] : [];
   state.score = hasValidBoard ? payload.score || { [BLACK]: 0, [WHITE]: 0 } : { [BLACK]: 0, [WHITE]: 0 };
-  state.hostColor = payload.hostColor || state.hostColor;
+  state.hostColor = payload.hostColor ? parseHostColor(payload.hostColor, state.hostColor) : state.hostColor;
   setRuleMode(payload.ruleMode || state.ruleMode);
   setTimerMode(payload.timerMode || state.timerMode);
   state.timeoutLoser = payload.timeoutLoser || EMPTY;
